@@ -604,7 +604,10 @@ class VPNManager:
                 {"type": "dns", "tag": "dns-out"},
             ],
             "route": {
-                "rules": [{"protocol": "dns", "outbound": "dns-out"}],
+                "rules": [
+                    {"protocol": "dns", "outbound": "dns-out"},
+                    {"ip_is_private": True, "outbound": "direct"}
+                ],
                 "auto_detect_interface": True,
             },
         }
