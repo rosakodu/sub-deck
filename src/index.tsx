@@ -460,11 +460,12 @@ function Content() {
         ) : (
           subscriptions.map((url, idx) => (
             <PanelSectionRow key={idx}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
-                <div style={{ fontSize: "14px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "70%" }}>
-                  {getDomainLabel(url)}
-                </div>
+              <div style={{ fontSize: "14px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", width: "100%", padding: "4px 0" }}>
+                {getDomainLabel(url)}
+              </div>
+              <div style={{ marginTop: "4px" }}>
                 <ButtonItem
+                  layout="below"
                   onClick={() => handleDeleteSubscription(url)}
                   disabled={loading}
                 >
