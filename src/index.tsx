@@ -538,8 +538,8 @@ function Content() {
 
 export default definePlugin(() => {
   return {
-    name: "sub-deck",
-    titleView: <div className={staticClasses.Title}>sub-deck</div>,
+    name: "SUB Deck",
+    titleView: <div className={staticClasses.Title}>SUB Deck</div>,
     content: <Content />,
     icon: <FaNetworkWired />,
     onDismount() {
