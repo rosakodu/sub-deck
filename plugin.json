@@ -1,0 +1,11 @@
+{
+  "name": "sub-deck",
+  "author": "rosakodu",
+  "flags": ["debug", "root"],
+  "api_version": 1,
+  "publish": {
+    "tags": ["network", "vpn", "vless", "proxy", "sing-box"],
+    "description": "Subscription manager for VLESS, VMess, Trojan, Shadowsocks, Hysteria 2 with automatic TUN routing.",
+    "image": "https://raw.githubusercontent.com/rosakodu/sub-deck/main/assets/icon.png"
+  }
+}
