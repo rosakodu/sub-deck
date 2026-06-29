@@ -355,6 +355,25 @@ function Content() {
 
       setNodes(fetchedNodes);
 
+      // Проверяем, осталась ли выбранная нода в списке доступных
+      if (selectedNode) {
+        const stillExists = fetchedNodes.some(
+          (n) => n.name === selectedNode.name && n.server === selectedNode.server
+        );
+        if (!stillExists) {
+          if (connected) {
+            try {
+              await disconnect();
+            } catch (e) {
+              console.error("Disconnect on delete error:", e);
+            }
+            setConnected(false);
+            toaster.toast({ title: t("tunnelStopped"), body: t("tunnelStoppedBody") });
+          }
+          setSelectedNode(null);
+        }
+      }
+
       // Перезапрашиваем актуальный список подписок
       const rawSettings = await getSettings();
       const settings = (rawSettings as any)?.result ?? rawSettings;
