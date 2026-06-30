@@ -1,7 +1,9 @@
 {
   "name": "sub-deck",
   "author": "rosakodu",
-  "flags": ["debug", "root"],
+  "flags": [
+    "root"
+  ],
   "api_version": 1,
   "publish": {
     "tags": ["network", "vpn", "vless", "proxy", "sing-box"],

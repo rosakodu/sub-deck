@@ -10,6 +10,34 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from vpn_manager import VPNManager
 
 
+def get_user_home() -> str:
+    """Надежно определяет домашнюю директорию пользователя, обходя root."""
+    env_home = os.environ.get("DECKY_USER_HOME")
+    if env_home and os.path.isdir(env_home):
+        return env_home
+        
+    try:
+        if hasattr(decky, "DECKY_USER_HOME") and decky.DECKY_USER_HOME:
+            if os.path.isdir(decky.DECKY_USER_HOME):
+                return decky.DECKY_USER_HOME
+    except Exception:
+        pass
+        
+    if os.path.isdir("/home/deck"):
+        return "/home/deck"
+        
+    if os.path.isdir("/home"):
+        try:
+            for user in os.listdir("/home"):
+                if user != "lost+found":
+                    user_path = f"/home/{user}"
+                    if os.path.isdir(user_path):
+                        return user_path
+        except Exception:
+            pass
+            
+    return os.path.expanduser("~")
+
 
 class Plugin:
 
@@ -23,7 +51,7 @@ class Plugin:
         )
         settings_dir = os.environ.get(
             "DECKY_PLUGIN_SETTINGS_DIR",
-            os.path.join(decky.DECKY_USER_HOME, ".config", "sub-deck")
+            os.path.join(get_user_home(), ".config", "sub-deck")
         )
 
         self.vpn = VPNManager(plugin_dir, settings_dir, logger=decky.logger)
