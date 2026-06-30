@@ -31,6 +31,7 @@ interface NodeConfig {
 const getSettings = callable<[], { subscriptions: string[]; selected_node: NodeConfig | null }>("get_settings");
 const addSubscription = callable<[url: string], NodeConfig[]>("add_subscription");
 const removeSubscription = callable<[url: string], NodeConfig[]>("remove_subscription");
+const updateSubscription = callable<[url: string], NodeConfig[]>("update_subscription");
 const getNodes = callable<[], NodeConfig[]>("get_nodes");
 const connectNode = callable<[node: NodeConfig], boolean>("connect_node");
 const disconnect = callable<[], boolean>("disconnect");
@@ -61,7 +62,8 @@ type TranslationKeys =
   | "logButton"
   | "subscriptionsTitle"
   | "noSubscriptions"
-  | "deleteBtn";
+  | "deleteBtn"
+  | "updateBtn";
 
 const translations: Record<string, Record<TranslationKeys, string>> = {
   english: {
@@ -87,7 +89,8 @@ const translations: Record<string, Record<TranslationKeys, string>> = {
     logButton: "LOG",
     subscriptionsTitle: "My Subscriptions",
     noSubscriptions: "No subscriptions added",
-    deleteBtn: "Delete"
+    deleteBtn: "Delete",
+    updateBtn: "Update"
   },
   russian: {
     title: "Управление VLESS",
@@ -112,7 +115,8 @@ const translations: Record<string, Record<TranslationKeys, string>> = {
     logButton: "LOG",
     subscriptionsTitle: "Мои подписки",
     noSubscriptions: "Нет добавленных подписок",
-    deleteBtn: "Удалить"
+    deleteBtn: "Удалить",
+    updateBtn: "Обновить"
   },
   schinese: {
     title: "VLESS 管理",
@@ -137,7 +141,8 @@ const translations: Record<string, Record<TranslationKeys, string>> = {
     logButton: "LOG",
     subscriptionsTitle: "我的订阅",
     noSubscriptions: "无订阅链接",
-    deleteBtn: "删除"
+    deleteBtn: "删除",
+    updateBtn: "更新"
   },
   tchinese: {
     title: "VLESS 管理",
@@ -162,7 +167,8 @@ const translations: Record<string, Record<TranslationKeys, string>> = {
     logButton: "LOG",
     subscriptionsTitle: "我的訂閱",
     noSubscriptions: "無訂閱連結",
-    deleteBtn: "刪除"
+    deleteBtn: "刪除",
+    updateBtn: "更新"
   },
   arabic: {
     title: "إدارة VLESS",
@@ -187,7 +193,8 @@ const translations: Record<string, Record<TranslationKeys, string>> = {
     logButton: "LOG",
     subscriptionsTitle: "اشتراكاتي",
     noSubscriptions: "لا توجد اشتراكات مضافة",
-    deleteBtn: "حذف"
+    deleteBtn: "حذف",
+    updateBtn: "تحديث"
   },
   persian: {
     title: "مدیریت VLESS",
@@ -212,7 +219,8 @@ const translations: Record<string, Record<TranslationKeys, string>> = {
     logButton: "LOG",
     subscriptionsTitle: "اشتراک‌های من",
     noSubscriptions: "هیچ اشتراکی اضافه نشده است",
-    deleteBtn: "حذف"
+    deleteBtn: "حذف",
+    updateBtn: "به‌روزرسانی"
   },
   turkish: {
     title: "VPN Yapılandırmaları",
@@ -237,7 +245,8 @@ const translations: Record<string, Record<TranslationKeys, string>> = {
     logButton: "LOG",
     subscriptionsTitle: "Aboneliklerim",
     noSubscriptions: "Eklenmiş abonelik yok",
-    deleteBtn: "Sil"
+    deleteBtn: "Sil",
+    updateBtn: "Güncelle"
   }
 };
 
@@ -387,6 +396,26 @@ function Content() {
     }
   };
 
+  const handleUpdateSubscription = async (urlToUpdate: string) => {
+    setLoading(true);
+    try {
+      const raw = await updateSubscription(urlToUpdate);
+      const fetchedNodes: NodeConfig[] = Array.isArray(raw)
+        ? raw
+        : (raw as any)?.result ?? [];
+
+      setNodes(fetchedNodes);
+      toaster.toast({
+        title: t("success"),
+        body: t("loadedNodes", { count: fetchedNodes.length })
+      });
+    } catch (err) {
+      toaster.toast({ title: t("error"), body: `${err}` });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleNodeClick = async (node: NodeConfig) => {
     const isCurrentActive = selectedNode && selectedNode.name === node.name && connected;
 
@@ -482,14 +511,25 @@ function Content() {
               <div style={{ fontSize: "14px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", width: "100%", padding: "4px 0" }}>
                 {getDomainLabel(url)}
               </div>
-              <div style={{ marginTop: "4px" }}>
-                <ButtonItem
-                  layout="below"
-                  onClick={() => handleDeleteSubscription(url)}
-                  disabled={loading}
-                >
-                  {t("deleteBtn")}
-                </ButtonItem>
+              <div style={{ marginTop: "4px", display: "flex", gap: "8px" }}>
+                <div style={{ flex: 1 }}>
+                  <ButtonItem
+                    layout="below"
+                    onClick={() => handleUpdateSubscription(url)}
+                    disabled={loading}
+                  >
+                    {t("updateBtn")}
+                  </ButtonItem>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <ButtonItem
+                    layout="below"
+                    onClick={() => handleDeleteSubscription(url)}
+                    disabled={loading}
+                  >
+                    {t("deleteBtn")}
+                  </ButtonItem>
+                </div>
               </div>
             </PanelSectionRow>
           ))

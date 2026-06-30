@@ -92,6 +92,10 @@ class VPNManager:
             self.log(f"Removed subscription URL: {url}")
         return self.parse_all_subscriptions()
 
+    def update_subscription(self, url):
+        self.log(f"Updating subscription: {url}")
+        return self.parse_all_subscriptions()
+
 
     def save_settings(self, settings):
         try:

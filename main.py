@@ -80,6 +80,12 @@ class Plugin:
         )
         return nodes
 
+    async def update_subscription(self, url: str) -> list:
+        nodes = await self.loop.run_in_executor(
+            None, self.vpn.update_subscription, url
+        )
+        return nodes
+
 
     async def get_steam_language(self) -> str:
         """Считывает язык из Steam registry.vdf (как в warp-deck)"""
