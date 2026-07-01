@@ -4,17 +4,31 @@
 
 A Decky Loader plugin for Steam Deck that allows you to manage VLESS, VMess, Trojan, Shadowsocks, and Hysteria 2 subscriptions and connect to them with automatic system-wide TUN routing using `sing-box`.
 
-![Screenshot](assets/screenshot.jpeg)
+![Screenshot](assets/screenshot.png)
 
 ## 📋 Features
 
-- **Multi-Protocol Support**: VLESS (Reality, TLS, None), VMess, Trojan, Shadowsocks, and Hysteria 2 / Hy2.
-- **Multiple Subscriptions**: Add and manage different subscription URLs simultaneously. Nodes from all subscriptions are automatically combined.
-- **System-wide TUN Routing**: Automatically routes all Steam Deck internet traffic through `sing-box` TUN interface (`tun0`).
-- **One-click Toggle**: Connect by simply clicking the server in the list, click again to disconnect.
-- **Quick Logging**: Click the **LOG** button to write combined plugin & core logs to `/home/deck/sub-deck.log` and copy them to your clipboard.
-- **Root Privileges**: Correctly runs as `root` for network configuration.
-- **No Dependencies Needed**: Automatically downloads `sing-box` core binary on first connection.
+### 🛠️ Routing Presets
+*   **"Default"** — all traffic is routed through the VPN.
+*   **"RoscomVPN"** — smart routing bypass (RU/BY websites and BitTorrent directly, blocked resources via VPN, advertisements and Windows telemetry are blocked).
+*   **Offline Databases & Auto-Update:** Automatic download and update of geofiles by Python in the background every 6 hours (ensuring instant VPN start thanks to bundled databases).
+
+### 🔍 Smart Server Filtering
+*   **Fast Ping:** Parallel TCP ping during subscription updates (1.0 sec timeout).
+*   **Top 15 Selection:** Automatic selection and display of the top 15 fastest working nodes (even if the subscription contains over 100,000 keys, with a limit of 5 nodes for Free Configs).
+*   **Deduplication:** Automatic removal of duplicate servers with identical names or network endpoints (`ip:port`).
+
+### 📱 Updated Vertical Interface
+*   **Grouping:** Servers are no longer mixed together; they are grouped strictly under their respective subscriptions.
+*   **Convenient Management:** The "Update" button is placed vertically above the "Delete" button for each subscription.
+*   **Compact Design:** Compact typography (11px, uppercase) is used for subscription headers.
+*   **Pixel-Perfect Outline:** The blue outline highlight of the selected node and routing preset fits pixel-to-pixel over button boundaries.
+
+### 🎁 "Free Configs" Button
+*   Add a pre-verified, daily-updated database of free configurations for Russia (VPN VLESS Configs Russia) in a single click.
+
+### 🔄 Background Subscription Auto-Update
+*   Support for the `profile-update-interval` HTTP header to automatically refresh servers in the background.
 
 ## 📥 Installation
 
