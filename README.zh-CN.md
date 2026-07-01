@@ -1,6 +1,6 @@
 # sub-deck
 
-[English](README.md) | [Русский](README.ru.md) | [中文](README.zh.md) | [العربية](README.ar.md) | [فارسی](README.fa.md) | [Türkçe](README.tr.md)
+[English](README.md) | [Русский](README.ru.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md) | [العربية](README.ar.md) | [فارسی](README.fa.md) | [Türkçe](README.tr.md)
 
 Steam Deck 的 Decky Loader 插件，允许您管理 VLESS、VMess、Trojan、Shadowsocks 和 Hysteria 2 订阅，并使用 `sing-box` 通过自动系统级 TUN 路由连接它们。
 
