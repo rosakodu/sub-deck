@@ -24,7 +24,7 @@ Steam Deck için Decky Loader eklentisi. VLESS, VMess, Trojan, Shadowsocks ve Hy
 
 ## 🚀 Nasıl Kullanılır
 
-1. Abonelik URL'nizi girin (ör. `https://s.subdeck.shop/...`) ve **"Add Subscription"** düğmesine tıklayın.
+1. Abonelik URL'nizi girin (ör. `https://...`) ve **"Add Subscription"** düğmesine tıklayın.
 2. Bağlantıyı etkinleştirmek için **"Available Servers"** listesindeki herhangi bir sunucuya tıklayın.
 3. Seçilen sunucu vurgulanacak ve üst etikette **"Connected to: <name>"** gösterilecektir.
 4. Bağlantıyı kesmek için listedeki aktif sunucuya tekrar tıklamanız yeterlidir.

@@ -24,7 +24,7 @@ Steam Deck 的 Decky Loader 插件，允许您管理 VLESS、VMess、Trojan、Sh
 
 ## 🚀 如何使用
 
-1. 输入您的订阅 URL（例如 `https://s.subdeck.shop/...`）并点击 **"Add Subscription"**。
+1. 输入您的订阅 URL（例如 `https://...`）并点击 **"Add Subscription"**。
 2. 在 **"Available Servers"** 列表中点击任何服务器即可激活连接。
 3. 选中的服务器将会高亮显示，并且顶部标签会显示 **"Connected to: <name>"**。
 4. 如需断开连接，只需再次点击列表中当前激活的服务器即可。

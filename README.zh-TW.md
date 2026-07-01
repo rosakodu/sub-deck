@@ -24,7 +24,7 @@ Steam Deck 的 Decky Loader 外掛程式，讓您能夠管理 VLESS、VMess、Tr
 
 ## 🚀 如何使用
 
-1. 輸入您的訂閱 URL（例如 `https://s.subdeck.shop/...`）並點擊 **"Add Subscription"**。
+1. 輸入您的訂閱 URL（例如 `https://...`）並點擊 **"Add Subscription"**。
 2. 在 **"Available Servers"** 清單中點擊任何伺服器即可啟用連接。
 3. 選中的伺服器將會反白顯示，並且頂部標籤會顯示 **"Connected to: <name>"**。
 4. 如需斷開連接，只需再次點擊清單中目前啟用的伺服器即可。

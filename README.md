@@ -24,7 +24,7 @@ A Decky Loader plugin for Steam Deck that allows you to manage VLESS, VMess, Tro
 
 ## 🚀 How to Use
 
-1. Enter your subscription URL (e.g. `https://s.subdeck.shop/...`) and click **"Add Subscription"**.
+1. Enter your subscription URL (e.g. `https://...`) and click **"Add Subscription"**.
 2. Click any server in the **"Available Servers"** list to activate the connection.
 3. The selected server will highlight, and the top label will show **"Connected to: <name>"**.
 4. To disconnect, simply click the active server in the list again.
