@@ -1,6 +1,6 @@
 # sub-deck
 
-[English](README.md)
+[English](README.md) | [Русский](README.ru.md) | [中文](README.zh.md) | [العربية](README.ar.md) | [فارسی](README.fa.md) | [Türkçe](README.tr.md)
 
 Плагин для Decky Loader на Steam Deck, позволяющий удобно управлять подписками VLESS, VMess, Trojan, Shadowsocks и Hysteria 2, а также подключаться к ним с автоматическим системным TUN-туннелированием всего трафика через `sing-box`.
 
