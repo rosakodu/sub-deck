@@ -11,6 +11,7 @@ Steam Deck 的 Decky Loader 插件，允许您管理 VLESS、VMess、Trojan、Sh
 - **多协议支持**：VLESS (Reality, TLS, None), VMess, Trojan, Shadowsocks, 以及 Hysteria 2 / Hy2。
 - **多订阅管理**：支持同时添加和管理多个订阅链接。来自所有订阅的节点将自动合并。
 - **系统级 TUN 路由**：自动将所有 Steam Deck 的网络流量通过 `sing-box` TUN 接口 (`tun0`) 进行路由。
+- **路由预设**: 支持 **“默认”** 模式（所有流量通过 VPN）和 **[RoscomVPN](https://github.com/hydraponique/roscomvpn-routing)** 模式（智能分流绕过：Steam、Twitch 和中俄本地网站直连，被屏蔽的资源走 VPN，广告和遥测数据被拦截）。
 - **一键切换**：只需在列表中点击服务器即可连接，再次点击已连接的服务器即可断开。
 - **快速日志**：点击 **LOG** 按钮可将插件和核心的合并日志写入 `/home/deck/sub-deck.log`，并将其复制到剪贴板。
 - **Root 权限**：为了配置网络，插件会正确地以 `root` 权限运行。

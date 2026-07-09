@@ -11,6 +11,7 @@ Steam Deck için Decky Loader eklentisi. VLESS, VMess, Trojan, Shadowsocks ve Hy
 - **Çoklu Protokol Desteği**: VLESS (Reality, TLS, None), VMess, Trojan, Shadowsocks ve Hysteria 2 / Hy2.
 - **Birden Fazla Abonelik**: Farklı abonelik bağlantılarını aynı anda ekleyin ve yönetin. Tüm aboneliklerdeki düğümler otomatik olarak birleştirilir.
 - **Sistem Genelinde TUN Yönlendirmesi**: Tüm Steam Deck internet trafiğini otomatik olarak `sing-box` TUN arayüzü (`tun0`) üzerinden yönlendirir.
+- **Yönlendirme Modları**: **"Varsayılan"** mod (tüm trafik VPN üzerinden geçer) ve **[RoscomVPN](https://github.com/hydraponique/roscomvpn-routing)** modu (akıllı yönlendirme: Steam, Twitch ve yerel web siteleri doğrudan bağlanır, engelli siteler VPN üzerinden geçer, reklamlar ve telemetri engellenir) desteği.
 - **Tek Tıkla Bağlantı**: Listeden sunucuya tıklayarak bağlanın, bağlantıyı kesmek için tekrar tıklayın.
 - **Hızlı Loglama**: Eklenti ve çekirdek loglarını `/home/deck/sub-deck.log` dosyasına yazmak ve panoya kopyalamak için **LOG** düğmesine tıklayın.
 - **Root Ayrıcalıkları**: Ağ yapılandırması için sorunsuz şekilde `root` olarak çalışır.

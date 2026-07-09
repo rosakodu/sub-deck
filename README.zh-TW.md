@@ -11,6 +11,7 @@ Steam Deck 的 Decky Loader 外掛程式，讓您能夠管理 VLESS、VMess、Tr
 - **多協定支援**：VLESS (Reality, TLS, None)、VMess、Trojan、Shadowsocks 以及 Hysteria 2 / Hy2。
 - **多訂閱管理**：支援同時新增和管理多個訂閱連結。來自所有訂閱的節點將自動合併。
 - **系統級 TUN 路由**：自動將所有 Steam Deck 的網路流量透過 `sing-box` TUN 介面 (`tun0`) 進行路由。
+- **路由預設**: 支援 **「默認」** 模式（所有流量通過 VPN）和 **[RoscomVPN](https://github.com/hydraponique/roscomvpn-routing)** 模式（智能分流繞過：Steam、Twitch 和中俄本地網站直連，被屏蔽的資源走 VPN，廣告和遙測數據被攔截）。
 - **一鍵切換**：只需在清單中點擊伺服器即可連接，再次點擊已連接的伺服器即可斷開。
 - **快速日誌**：點擊 **LOG** 按鈕可將外掛和核心的合併日誌寫入 `/home/deck/sub-deck.log`，並將其複製到剪貼簿。
 - **Root 權限**：為了配置網路，外掛會正確地以 `root` 權限執行。
