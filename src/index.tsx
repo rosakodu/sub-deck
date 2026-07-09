@@ -736,7 +736,12 @@ function Content() {
       </PanelSectionRow>
 
       {/* Список добавленных подписок */}
-      <PanelSection title={t("subscriptionsTitle")}>
+      <div style={{ display: "flex", justifyContent: "center", width: "100%", padding: "12px 0 6px 0" }}>
+        <span style={{ fontSize: "11px", fontWeight: "bold", color: "#a5a5a5", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+          {t("subscriptionsTitle")}
+        </span>
+      </div>
+      <PanelSection>
         {subscriptions.length === 0 ? (
           <PanelSectionRow>
             <div style={{ color: "#888", fontSize: "14px", padding: "8px 0" }}>{t("noSubscriptions")}</div>
