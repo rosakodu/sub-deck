@@ -16,6 +16,15 @@ Steam Deck 的 Decky Loader 插件，允许您管理 VLESS、VMess、Trojan、Sh
 - **Root 权限**：为了配置网络，插件会正确地以 `root` 权限运行。
 - **无需额外依赖**：首次连接时会自动下载 `sing-box` 核心二进制文件。
 
+## 🎁 内置免费订阅
+
+插件包含一个**“免费订阅”**按钮，可一键添加三个经过预先验证且自动更新的源：
+- [igareck 订阅](https://github.com/igareck/vpn-configs-for-russia)：经典的、经过验证的俄罗斯绕过屏蔽的配置源（原“免费配置”）。
+- [Goida VPN (AvenCores)](https://github.com/AvenCores/goida-vpn-configs)：来自 Goida VPN 项目的频繁更新的 VLESS 配置。
+- [zieng2/wl 订阅](https://github.com/zieng2/wl)：来自 zieng2 wl 仓库的高质量通用 VLESS 配置。
+
+*注意：为了提高性能和连接速度，免费订阅将自动进行并行 TCP Ping 延迟测试，且仅保留并显示前 5 个最快的节点。*
+
 ## 📥 安装
 
 1. 从 [Releases](https://github.com/rosakodu/sub-deck/releases) 页面下载最新版本 (`sub-deck.zip`) 或手动构建。

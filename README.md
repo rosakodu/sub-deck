@@ -16,6 +16,15 @@ A Decky Loader plugin for Steam Deck that allows you to manage VLESS, VMess, Tro
 - **Root Privileges**: Correctly runs as `root` for network configuration.
 - **No Dependencies Needed**: Automatically downloads `sing-box` core binary on first connection.
 
+## 🎁 Built-in Free Subscriptions
+
+The plugin includes a **"Free Subscriptions"** button that adds three pre-verified, automatically updated sources:
+- [igareck Subscription](https://github.com/igareck/vpn-configs-for-russia): The classic, verified configuration source for Russia (formerly "Free Configs").
+- [Goida VPN (AvenCores)](https://github.com/AvenCores/goida-vpn-configs): Frequently updated VLESS configurations from the Goida VPN project.
+- [zieng2/wl Subscription](https://github.com/zieng2/wl): High-quality universal VLESS configurations from the zieng2 wl repository.
+
+*Note: For performance and speed, free subscriptions are automatically filtered to show only the top 5 fastest nodes based on parallel TCP ping.*
+
 ## 📥 Installation
 
 1. Download the latest release (`sub-deck.zip`) from [Releases](https://github.com/rosakodu/sub-deck/releases) or build it manually.

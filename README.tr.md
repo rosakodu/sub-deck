@@ -16,6 +16,15 @@ Steam Deck için Decky Loader eklentisi. VLESS, VMess, Trojan, Shadowsocks ve Hy
 - **Root Ayrıcalıkları**: Ağ yapılandırması için sorunsuz şekilde `root` olarak çalışır.
 - **Bağımlılık Gerektirmez**: İlk bağlantıda `sing-box` çekirdek ikili dosyasını otomatik olarak indirir.
 
+## 🎁 Dahili Ücretsiz Abonelikler
+
+Eklenti, önceden doğrulanmış ve otomatik olarak güncellenen üç kaynağı tek bir tıklamayla ekleyen bir **"Ücretsiz Abonelikler"** düğmesi içerir:
+- [igareck Aboneliği](https://github.com/igareck/vpn-configs-for-russia): Rusya'daki engellemeleri aşmak için klasik, doğrulanmış yapılandırma kaynağı (eski adıyla "Ücretsiz Yapılandırmalar").
+- [Goida VPN (AvenCores)](https://github.com/AvenCores/goida-vpn-configs): Goida VPN projesinden sık sık güncellenen VLESS yapılandırmaları.
+- [zieng2/wl Aboneliği](https://github.com/zieng2/wl): zieng2 wl deposundan yüksek kaliteli evrensel VLESS yapılandırmaları.
+
+*Not: Performans ve hız için, ücretsiz abonelikler paralel TCP ping testine tabi tutularak yalnızca en hızlı 5 aktif sunucu gösterilecek şekilde otomatik olarak filtrelenir.*
+
 ## 📥 Kurulum
 
 1. [Sürümler (Releases)](https://github.com/rosakodu/sub-deck/releases) sayfasından en son sürümü (`sub-deck.zip`) indirin veya manuel olarak derleyin.
