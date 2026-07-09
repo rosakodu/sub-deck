@@ -20,7 +20,7 @@ Steam Deck için Decky Loader eklentisi. VLESS, VMess, Trojan, Shadowsocks ve Hy
 ## 🎁 Dahili Ücretsiz Abonelikler
 
 Eklenti, önceden doğrulanmış ve otomatik olarak güncellenen üç kaynağı tek bir tıklamayla ekleyen bir **"Ücretsiz Abonelikler"** düğmesi içerir:
-- [igareck Aboneliği](https://github.com/igareck/vpn-configs-for-russia): Rusya'daki engellemeleri aşmak için klasik, doğrulanmış yapılandırma kaynağı (eski adıyla "Ücretsiz Yapılandırmalar").
+- [igareck Aboneliği](https://github.com/igareck/vpn-configs-for-russia): Rusya'daki engellemeleri aşmak için klasik, doğrulanmış yapılandırma kaynağı.
 - [Goida VPN (AvenCores)](https://github.com/AvenCores/goida-vpn-configs): Goida VPN projesinden sık sık güncellenen VLESS yapılandırmaları.
 - [zieng2/wl Aboneliği](https://github.com/zieng2/wl): zieng2 wl deposundan yüksek kaliteli evrensel VLESS yapılandırmaları.
 

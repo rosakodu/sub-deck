@@ -20,7 +20,7 @@ A Decky Loader plugin for Steam Deck that allows you to manage VLESS, VMess, Tro
 ## 🎁 Built-in Free Subscriptions
 
 The plugin includes a **"Free Subscriptions"** button that adds three pre-verified, automatically updated sources:
-- [igareck Subscription](https://github.com/igareck/vpn-configs-for-russia): The classic, verified configuration source for Russia (formerly "Free Configs").
+- [igareck Subscription](https://github.com/igareck/vpn-configs-for-russia): The classic, verified configuration source for Russia.
 - [Goida VPN (AvenCores)](https://github.com/AvenCores/goida-vpn-configs): Frequently updated VLESS configurations from the Goida VPN project.
 - [zieng2/wl Subscription](https://github.com/zieng2/wl): High-quality universal VLESS configurations from the zieng2 wl repository.
 
