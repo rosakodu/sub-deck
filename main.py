@@ -2,6 +2,7 @@ import os
 import sys
 import re
 import asyncio
+import time
 import decky
 
 # Добавляем папку плагина в sys.path — Decky Loader не делает это автоматически
@@ -57,6 +58,9 @@ class Plugin:
         self.vpn = VPNManager(plugin_dir, settings_dir, logger=decky.logger)
         decky.logger.info(f"sub-deck loaded. settings_dir={settings_dir}")
 
+        # Запускаем фоновый цикл автообновления подписок и баз
+        self.update_task = asyncio.create_task(self._auto_update_loop())
+
     # ────────────────────────────────────────────────
     # API для фронтенда
     # ────────────────────────────────────────────────
@@ -74,6 +78,17 @@ class Plugin:
         )
         return nodes
 
+    async def add_free_subscriptions(self) -> list:
+        urls = [
+            "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/Vless-Reality-White-Lists-Rus-Mobile.txt",
+            "https://raw.githubusercontent.com/AvenCores/goida-vpn-configs/main/githubmirror/1.txt",
+            "https://raw.githubusercontent.com/zieng2/wl/main/vless_universal.txt"
+        ]
+        nodes = await self.loop.run_in_executor(
+            None, self.vpn.add_multiple_subscriptions, urls
+        )
+        return nodes
+
     async def remove_subscription(self, url: str) -> list:
         nodes = await self.loop.run_in_executor(
             None, self.vpn.remove_subscription, url
@@ -85,6 +100,14 @@ class Plugin:
             None, self.vpn.update_subscription, url
         )
         return nodes
+
+    async def save_preset(self, preset: str) -> bool:
+        settings = self.vpn.load_settings()
+        settings["selected_preset"] = preset
+        self.vpn.save_settings(settings)
+        if preset == "roscomvpn":
+            await self.loop.run_in_executor(None, self.vpn.update_geofiles, False)
+        return True
 
 
     async def get_steam_language(self) -> str:
@@ -182,11 +205,60 @@ class Plugin:
         settings = self.vpn.load_settings()
         return settings.get("selected_node")
 
+    async def check_and_update_subscriptions(self):
+        settings = self.vpn.load_settings()
+        urls = settings.get("subscriptions", [])
+        intervals = settings.get("update_intervals", {})
+        last_updates = settings.get("last_update_times", {})
+
+        now = int(time.time())
+        updated_any = False
+
+        for url in urls:
+            interval_hours = intervals.get(url)
+            if not interval_hours:
+                continue
+
+            last_update = last_updates.get(url, 0)
+            if now - last_update >= interval_hours * 3600:
+                decky.logger.info(f"Auto-updating subscription: {url} (interval: {interval_hours}h)")
+                try:
+                    nodes, interval = await self.loop.run_in_executor(
+                        None, self.vpn.parse_subscription, url
+                    )
+                    last_updates[url] = now
+                    if interval is not None:
+                        intervals[url] = int(interval)
+                    updated_any = True
+                except Exception as e:
+                    decky.logger.error(f"Failed to auto-update subscription {url}: {e}")
+
+        if updated_any:
+            settings["last_update_times"] = last_updates
+            settings["update_intervals"] = intervals
+            self.vpn.save_settings(settings)
+            
+            await self.loop.run_in_executor(None, self.vpn.parse_all_subscriptions)
+            decky.logger.info("Subscriptions auto-updated successfully.")
+
+    async def _auto_update_loop(self):
+        # Ожидаем 30 секунд после старта
+        await asyncio.sleep(30)
+        while True:
+            try:
+                await self.check_and_update_subscriptions()
+                await self.loop.run_in_executor(None, self.vpn.update_geofiles)
+            except Exception as e:
+                decky.logger.error(f"Auto update loop error: {e}")
+            await asyncio.sleep(900)
+
     # ────────────────────────────────────────────────
     # Lifecycle
     # ────────────────────────────────────────────────
 
     async def _unload(self):
+        if hasattr(self, "update_task"):
+            self.update_task.cancel()
         if hasattr(self, "vpn"):
             self.vpn.stop()
         decky.logger.info("sub-deck unloaded")

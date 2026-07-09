@@ -25,13 +25,18 @@ interface NodeConfig {
   sid: string;
   flow: string;
   fp: string;
+  subscription_url?: string;
+  transport?: string;
+  method?: string;
 }
 
 // Связываем функции бэкенда с фронтендом
-const getSettings = callable<[], { subscriptions: string[]; selected_node: NodeConfig | null }>("get_settings");
+const getSettings = callable<[], { subscriptions: string[]; selected_node: NodeConfig | null; selected_preset?: string }>("get_settings");
 const addSubscription = callable<[url: string], NodeConfig[]>("add_subscription");
+const addFreeSubscriptions = callable<[], NodeConfig[]>("add_free_subscriptions");
 const removeSubscription = callable<[url: string], NodeConfig[]>("remove_subscription");
 const updateSubscription = callable<[url: string], NodeConfig[]>("update_subscription");
+const savePreset = callable<[preset: string], boolean>("save_preset");
 const getNodes = callable<[], NodeConfig[]>("get_nodes");
 const connectNode = callable<[node: NodeConfig], boolean>("connect_node");
 const disconnect = callable<[], boolean>("disconnect");
@@ -63,7 +68,13 @@ type TranslationKeys =
   | "subscriptionsTitle"
   | "noSubscriptions"
   | "deleteBtn"
-  | "updateBtn";
+  | "updateBtn"
+  | "presetLabel"
+  | "presetDefault"
+  | "presetRoscom"
+  | "addFreeBtn"
+  | "loadedNodesForSub"
+  | "freeConfigsUpdated";
 
 const translations: Record<string, Record<TranslationKeys, string>> = {
   english: {
@@ -90,7 +101,13 @@ const translations: Record<string, Record<TranslationKeys, string>> = {
     subscriptionsTitle: "My Subscriptions",
     noSubscriptions: "No subscriptions added",
     deleteBtn: "Delete",
-    updateBtn: "Update"
+    updateBtn: "Update",
+    presetLabel: "Routing Preset",
+    presetDefault: "Default",
+    presetRoscom: "RoscomVPN",
+    addFreeBtn: "Free Subscriptions",
+    loadedNodesForSub: "Subscription nodes updated: {count}",
+    freeConfigsUpdated: "Free subscriptions updated"
   },
   russian: {
     title: "Управление VLESS",
@@ -116,7 +133,13 @@ const translations: Record<string, Record<TranslationKeys, string>> = {
     subscriptionsTitle: "Мои подписки",
     noSubscriptions: "Нет добавленных подписок",
     deleteBtn: "Удалить",
-    updateBtn: "Обновить"
+    updateBtn: "Обновить",
+    presetLabel: "Режим маршрутизации",
+    presetDefault: "По умолчанию",
+    presetRoscom: "RoscomVPN",
+    addFreeBtn: "Бесплатные подписки",
+    loadedNodesForSub: "Обновлено нод в этой подписке: {count}",
+    freeConfigsUpdated: "Бесплатные подписки обновлены"
   },
   schinese: {
     title: "VLESS 管理",
@@ -142,7 +165,13 @@ const translations: Record<string, Record<TranslationKeys, string>> = {
     subscriptionsTitle: "我的订阅",
     noSubscriptions: "无订阅链接",
     deleteBtn: "删除",
-    updateBtn: "更新"
+    updateBtn: "更新",
+    presetLabel: "分流规则",
+    presetDefault: "默认",
+    presetRoscom: "RoscomVPN",
+    addFreeBtn: "免费订阅",
+    loadedNodesForSub: "此订阅已更新节点: {count}",
+    freeConfigsUpdated: "免费订阅已更新"
   },
   tchinese: {
     title: "VLESS 管理",
@@ -168,7 +197,13 @@ const translations: Record<string, Record<TranslationKeys, string>> = {
     subscriptionsTitle: "我的訂閱",
     noSubscriptions: "無訂閱連結",
     deleteBtn: "刪除",
-    updateBtn: "更新"
+    updateBtn: "更新",
+    presetLabel: "分流規則",
+    presetDefault: "默認",
+    presetRoscom: "RoscomVPN",
+    addFreeBtn: "免費訂閱",
+    loadedNodesForSub: "此訂閱已更新節點: {count}",
+    freeConfigsUpdated: "免費訂閱已更新"
   },
   arabic: {
     title: "إدارة VLESS",
@@ -194,7 +229,13 @@ const translations: Record<string, Record<TranslationKeys, string>> = {
     subscriptionsTitle: "اشتراكاتي",
     noSubscriptions: "لا توجد اشتراكات مضافة",
     deleteBtn: "حذف",
-    updateBtn: "تحديث"
+    updateBtn: "تحديث",
+    presetLabel: "وضع التوجيه",
+    presetDefault: "الافتراضي",
+    presetRoscom: "RoscomVPN",
+    addFreeBtn: "اشتراكات مجانية",
+    loadedNodesForSub: "تم تحديث عقد الاشتراك: {count}",
+    freeConfigsUpdated: "تم تحديث الاشتراكات المجانية"
   },
   persian: {
     title: "مدیریت VLESS",
@@ -220,7 +261,13 @@ const translations: Record<string, Record<TranslationKeys, string>> = {
     subscriptionsTitle: "اشتراک‌های من",
     noSubscriptions: "هیچ اشتراکی اضافه نشده است",
     deleteBtn: "حذف",
-    updateBtn: "به‌روزرسانی"
+    updateBtn: "به‌روزرسانی",
+    presetLabel: "حالت مسیریابی",
+    presetDefault: "پیش‌فرض",
+    presetRoscom: "RoscomVPN",
+    addFreeBtn: "اشتراک‌های رایگان",
+    loadedNodesForSub: "گره‌های اشتراک به‌روزرسانی شد: {count}",
+    freeConfigsUpdated: "اشتراک‌های رایگان به‌روزرسانی شدند"
   },
   turkish: {
     title: "VPN Yapılandırmaları",
@@ -246,20 +293,71 @@ const translations: Record<string, Record<TranslationKeys, string>> = {
     subscriptionsTitle: "Aboneliklerim",
     noSubscriptions: "Eklenmiş abonelik yok",
     deleteBtn: "Sil",
-    updateBtn: "Güncelle"
+    updateBtn: "Güncelle",
+    presetLabel: "Yönlendirme Modu",
+    presetDefault: "Varsayılan",
+    presetRoscom: "RoscomVPN",
+    addFreeBtn: "Ücretsiz Abonelikler",
+    loadedNodesForSub: "Bu abonelikteki sunucular güncellendi: {count}",
+    freeConfigsUpdated: "Ücretsiz abonelikler güncellendi"
   }
 };
 
 translations.farsi = translations.persian;
 
 // Хелпер получения читаемого домена из URL подписки
-function getDomainLabel(url: string): string {
+function getDomainLabel(url: string, lang: string): string {
+  if (url.includes("igareck/vpn-configs-for-russia")) {
+    if (lang === "russian") return "Подписка igareck";
+    if (lang === "schinese") return "igareck 订阅";
+    if (lang === "tchinese") return "igareck 訂閱";
+    if (lang === "arabic") return "اشتراك igareck";
+    if (lang === "persian") return "اشتراک igareck";
+    if (lang === "turkish") return "igareck Aboneliği";
+    return "igareck Subscription";
+  }
+  if (url.includes("AvenCores/goida-vpn-configs")) {
+    if (lang === "russian") return "Подписка Goida VPN AvenCores";
+    if (lang === "schinese") return "Goida VPN AvenCores 订阅";
+    if (lang === "tchinese") return "Goida VPN AvenCores 訂閱";
+    if (lang === "arabic") return "اشتراك Goida VPN AvenCores";
+    if (lang === "persian") return "اشتراک Goida VPN AvenCores";
+    if (lang === "turkish") return "Goida VPN AvenCores Aboneliği";
+    return "Goida VPN AvenCores Subscription";
+  }
+  if (url.includes("zieng2/wl")) {
+    if (lang === "russian") return "Подписка zieng2";
+    if (lang === "schinese") return "zieng2 订阅";
+    if (lang === "tchinese") return "zieng2 訂閱";
+    if (lang === "arabic") return "اشتراك zieng2";
+    if (lang === "persian") return "اشتراک zieng2";
+    if (lang === "turkish") return "zieng2 Aboneliği";
+    return "zieng2 Subscription";
+  }
   try {
     const parsed = new URL(url);
     return parsed.hostname;
   } catch (e) {
     return url.length > 25 ? url.substring(0, 22) + "..." : url;
   }
+}
+
+// Хелпер для форматирования метода подключения (Protocol/Transport/Security)
+function getNodeMethodLabel(node: NodeConfig): string {
+  const protocol = (node.type || "unknown").toUpperCase();
+  
+  if (protocol === "SHADOWSOCKS") {
+    const method = (node.method || "unknown").toUpperCase();
+    return `${protocol}/${method}`;
+  }
+  
+  let transport = (node.transport || "tcp").toUpperCase();
+  if (protocol === "HYSTERIA2") {
+    transport = "UDP";
+  }
+  
+  const security = (node.security || "none").toUpperCase();
+  return `${protocol}/${transport}/${security}`;
 }
 
 function Content() {
@@ -270,6 +368,9 @@ function Content() {
   const [selectedNode, setSelectedNode] = useState<NodeConfig | null>(null);
   const [connected, setConnected] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
+  const [preset, setPreset] = useState<string>("default");
+  const [expandedSubs, setExpandedSubs] = useState<Record<string, boolean>>({});
+  const [presetExpanded, setPresetExpanded] = useState<boolean>(false);
 
   // Хук локализации
   const t = useMemo(() => {
@@ -303,6 +404,9 @@ function Content() {
         if (settings) {
           setSubscriptions(settings.subscriptions || []);
           setSelectedNode(settings.selected_node || null);
+          if (settings.selected_preset) {
+            setPreset(settings.selected_preset);
+          }
         }
 
         const rawNodes = await getNodes();
@@ -320,6 +424,40 @@ function Content() {
     };
     init();
   }, []);
+
+  const handlePresetChange = async (presetName: string, presetLabel: string) => {
+    setPreset(presetName);
+    try {
+      await savePreset(presetName);
+      toaster.toast({ title: t("success"), body: `${t("presetLabel")}: ${presetLabel}` });
+    } catch (err) {
+      toaster.toast({ title: t("error"), body: `${err}` });
+    }
+  };
+
+  const handleAddFreeVless = async () => {
+    setLoading(true);
+    try {
+      const raw = await addFreeSubscriptions();
+      const fetchedNodes = Array.isArray(raw) ? raw : (raw as any)?.result ?? [];
+      setNodes(fetchedNodes);
+      setInputUrl("");
+      toaster.toast({
+        title: t("success"),
+        body: t("freeConfigsUpdated")
+      });
+      
+      const rawSettings = await getSettings();
+      const settings = (rawSettings as any)?.result ?? rawSettings;
+      if (settings) {
+        setSubscriptions(settings.subscriptions || []);
+      }
+    } catch (err) {
+      toaster.toast({ title: t("error"), body: `${err}` });
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleAddSubscription = async () => {
     if (!inputUrl) {
@@ -343,9 +481,15 @@ function Content() {
         setSubscriptions(settings.subscriptions || []);
       }
 
+      const isFree = (
+        inputUrl.includes("igareck/vpn-configs-for-russia") ||
+        inputUrl.includes("AvenCores/goida-vpn-configs") ||
+        inputUrl.includes("zieng2/wl")
+      );
+      const addedCount = fetchedNodes.filter((n: any) => n.subscription_url === inputUrl).length;
       toaster.toast({
         title: t("success"),
-        body: t("loadedNodes", { count: fetchedNodes.length })
+        body: isFree ? t("freeConfigsUpdated") : t("loadedNodesForSub", { count: addedCount })
       });
     } catch (err) {
       toaster.toast({ title: t("error"), body: `${err}` });
@@ -405,9 +549,15 @@ function Content() {
         : (raw as any)?.result ?? [];
 
       setNodes(fetchedNodes);
+      const isFree = (
+        urlToUpdate.includes("igareck/vpn-configs-for-russia") ||
+        urlToUpdate.includes("AvenCores/goida-vpn-configs") ||
+        urlToUpdate.includes("zieng2/wl")
+      );
+      const updatedCount = fetchedNodes.filter((n: any) => n.subscription_url === urlToUpdate).length;
       toaster.toast({
         title: t("success"),
-        body: t("loadedNodes", { count: fetchedNodes.length })
+        body: isFree ? t("freeConfigsUpdated") : t("loadedNodesForSub", { count: updatedCount })
       });
     } catch (err) {
       toaster.toast({ title: t("error"), body: `${err}` });
@@ -480,6 +630,83 @@ function Content() {
 
   return (
     <PanelSection title={t("title")}>
+      {/* Выбор пресета маршрутизации */}
+      <PanelSection>
+        <PanelSectionRow>
+          <ButtonItem
+            layout="below"
+            onClick={() => setPresetExpanded(!presetExpanded)}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
+              <span style={{ fontSize: "11px", fontWeight: "bold", color: "#a5a5a5", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                {t("presetLabel")}
+              </span>
+              <span style={{ fontSize: "10px", color: "#888" }}>
+                {presetExpanded ? "▼" : "▶"}
+              </span>
+            </div>
+          </ButtonItem>
+        </PanelSectionRow>
+
+        {presetExpanded && (
+          <>
+            {/* Опция Default */}
+            <PanelSectionRow>
+              <div style={{ position: "relative", width: "100%" }}>
+                <ButtonItem
+                  layout="below"
+                  onClick={() => { handlePresetChange("default", t("presetDefault")); setPresetExpanded(false); }}
+                >
+                  <div style={{ fontWeight: preset === "default" ? "bold" : "normal", color: preset === "default" ? "#1a9fff" : "inherit" }}>
+                    {t("presetDefault")}
+                  </div>
+                </ButtonItem>
+                {preset === "default" && (
+                  <div style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    border: "1.5px solid #1a9fff",
+                    borderRadius: "4px",
+                    pointerEvents: "none",
+                    backgroundColor: "rgba(26, 159, 255, 0.1)"
+                  }} />
+                )}
+              </div>
+            </PanelSectionRow>
+
+            {/* Опция RoscomVPN */}
+            <PanelSectionRow>
+              <div style={{ position: "relative", width: "100%" }}>
+                <ButtonItem
+                  layout="below"
+                  onClick={() => { handlePresetChange("roscomvpn", t("presetRoscom")); setPresetExpanded(false); }}
+                >
+                  <div style={{ fontWeight: preset === "roscomvpn" ? "bold" : "normal", color: preset === "roscomvpn" ? "#1a9fff" : "inherit" }}>
+                    {t("presetRoscom")}
+                  </div>
+                </ButtonItem>
+                {preset === "roscomvpn" && (
+                  <div style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    border: "1.5px solid #1a9fff",
+                    borderRadius: "4px",
+                    pointerEvents: "none",
+                    backgroundColor: "rgba(26, 159, 255, 0.1)"
+                  }} />
+                )}
+              </div>
+            </PanelSectionRow>
+          </>
+        )}
+      </PanelSection>
+
       {/* Поле добавления новой подписки */}
       <PanelSectionRow>
         <TextField
@@ -498,6 +725,15 @@ function Content() {
           {loading ? t("updating") : t("addSubBtn")}
         </ButtonItem>
       </PanelSectionRow>
+      <PanelSectionRow>
+        <ButtonItem
+          layout="below"
+          onClick={handleAddFreeVless}
+          disabled={loading}
+        >
+          {t("addFreeBtn")}
+        </ButtonItem>
+      </PanelSectionRow>
 
       {/* Список добавленных подписок */}
       <PanelSection title={t("subscriptionsTitle")}>
@@ -506,81 +742,126 @@ function Content() {
             <div style={{ color: "#888", fontSize: "14px", padding: "8px 0" }}>{t("noSubscriptions")}</div>
           </PanelSectionRow>
         ) : (
-          subscriptions.map((url, idx) => (
-            <PanelSectionRow key={idx}>
-              <div style={{ fontSize: "14px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", width: "100%", padding: "4px 0" }}>
-                {getDomainLabel(url)}
-              </div>
-              <div style={{ marginTop: "4px", display: "flex", gap: "8px" }}>
-                <div style={{ flex: 1 }}>
+          subscriptions.map((url, idx) => {
+            const subNodes = nodes.filter(n => n.subscription_url === url);
+            const isFreeConfigs = (
+              url.includes("igareck/vpn-configs-for-russia") ||
+              url.includes("AvenCores/goida-vpn-configs") ||
+              url.includes("zieng2/wl")
+            );
+            const domainLabel = getDomainLabel(url, lang);
+            const isExpanded = expandedSubs[url] !== undefined ? expandedSubs[url] : (connected && selectedNode?.subscription_url === url);
+            
+            return (
+              <PanelSection key={idx}>
+                {/* Заголовок подписки в виде кнопки раскрытия */}
+                <PanelSectionRow>
                   <ButtonItem
                     layout="below"
-                    onClick={() => handleUpdateSubscription(url)}
-                    disabled={loading}
+                    onClick={() => setExpandedSubs(prev => ({ ...prev, [url]: !prev[url] }))}
                   >
-                    {t("updateBtn")}
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
+                      <span style={{ fontSize: "11px", fontWeight: "bold", color: "#a5a5a5", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                        {domainLabel}
+                      </span>
+                      <span style={{ fontSize: "10px", color: "#888" }}>
+                        {isExpanded ? "▼" : "▶"}
+                      </span>
+                    </div>
                   </ButtonItem>
-                </div>
-                <div style={{ flex: 1 }}>
-                  <ButtonItem
-                    layout="below"
-                    onClick={() => handleDeleteSubscription(url)}
-                    disabled={loading}
-                  >
-                    {t("deleteBtn")}
-                  </ButtonItem>
-                </div>
-              </div>
-            </PanelSectionRow>
-          ))
+                </PanelSectionRow>
+
+                {isExpanded && (
+                  <>
+                    {/* Список нод этой подписки */}
+                    {subNodes.length > 0 ? (
+                      <div style={{ maxHeight: "250px", overflowY: "auto", paddingRight: "4px", marginBottom: "8px" }}>
+                        {subNodes.map((node, nIdx) => {
+                          const isSelected = selectedNode?.name === node.name;
+                          const isActive = isSelected && connected;
+                          return (
+                            <PanelSectionRow key={nIdx}>
+                              <div style={{ position: "relative", width: "100%" }}>
+                                <ButtonItem
+                                  layout="below"
+                                  onClick={() => handleNodeClick(node)}
+                                >
+                                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
+                                    <div style={{ display: "flex", alignItems: "center", gap: "8px", textAlign: "left" }}>
+                                      <div>
+                                        <div style={{ fontWeight: isActive ? "bold" : "normal", color: isActive ? "#1a9fff" : "inherit" }}>
+                                          {node.name}
+                                        </div>
+                                        <div style={{ fontSize: "0.8em", color: "#888" }}>{getNodeMethodLabel(node)}</div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </ButtonItem>
+                                {isActive && (
+                                  <div style={{
+                                    position: "absolute",
+                                    top: 0,
+                                    left: 0,
+                                    right: 0,
+                                    bottom: 0,
+                                    border: "1.5px solid #1a9fff",
+                                    borderRadius: "4px",
+                                    pointerEvents: "none",
+                                    backgroundColor: "rgba(26, 159, 255, 0.1)"
+                                  }} />
+                                )}
+                              </div>
+                            </PanelSectionRow>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <PanelSectionRow>
+                        <div style={{ color: "#888", fontSize: "12px", padding: "4px 0" }}>
+                          {t("noNodesFound")}
+                        </div>
+                      </PanelSectionRow>
+                    )}
+
+                    {/* Статус подключенного сервера внутри конкретной подписки */}
+                    {connected && selectedNode && selectedNode.subscription_url === url && (
+                      <PanelSectionRow>
+                        <div style={{ color: "#1a9fff", fontWeight: "bold", padding: "4px 0", fontSize: "12px" }}>
+                          {t("selectedServer", { name: selectedNode.name })}
+                        </div>
+                      </PanelSectionRow>
+                    )}
+                    
+                    {/* Кнопки управления подпиской столбиком (Обновить НАД Удалить) */}
+                    {!isFreeConfigs && (
+                      <PanelSectionRow>
+                        <ButtonItem
+                          layout="below"
+                          onClick={() => handleUpdateSubscription(url)}
+                          disabled={loading}
+                        >
+                          {t("updateBtn")}
+                        </ButtonItem>
+                      </PanelSectionRow>
+                    )}
+                    <PanelSectionRow>
+                      <div style={{ color: "#ff6347" }}>
+                        <ButtonItem
+                          layout="below"
+                          onClick={() => handleDeleteSubscription(url)}
+                          disabled={loading}
+                        >
+                          {t("deleteBtn")}
+                        </ButtonItem>
+                      </div>
+                    </PanelSectionRow>
+                  </>
+                )}
+              </PanelSection>
+            );
+          })
         )}
       </PanelSection>
-
-      {/* Статус подключенного сервера */}
-      {connected && selectedNode && (
-        <PanelSectionRow>
-          <div style={{ color: "#1a9fff", fontWeight: "bold", padding: "8px 0" }}>
-            {t("selectedServer", { name: selectedNode.name })}
-          </div>
-        </PanelSectionRow>
-      )}
-
-      {/* Список нод */}
-      {nodes.length > 0 && (
-        <PanelSection title={t("nodesTitle", { count: nodes.length })}>
-          <div style={{ maxHeight: "250px", overflowY: "auto", paddingRight: "4px" }}>
-            {nodes.map((node, idx) => {
-              const isSelected = selectedNode?.name === node.name;
-              const isActive = isSelected && connected;
-              return (
-                <PanelSectionRow key={idx}>
-                  <div style={{
-                    border: isActive ? "1px solid #1a9fff" : "1px solid transparent",
-                    borderRadius: "4px",
-                    backgroundColor: isActive ? "rgba(26, 159, 255, 0.1)" : "transparent"
-                  }}>
-                    <ButtonItem
-                      layout="below"
-                      onClick={() => handleNodeClick(node)}
-                    >
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: "8px", textAlign: "left" }}>
-                          <div>
-                            <div style={{ fontWeight: isActive ? "bold" : "normal", color: isActive ? "#1a9fff" : "inherit" }}>
-                              {node.name}
-                            </div>
-                            <div style={{ fontSize: "0.8em", color: "#888" }}>{node.server}:{node.port}</div>
-                          </div>
-                        </div>
-                      </div>
-                    </ButtonItem>
-                  </div>
-                </PanelSectionRow>
-              );
-            })}
-          </div>
-        </PanelSection>
-      )}
 
       {/* Кнопка LOG перемещена в самый низ */}
       <PanelSectionRow>

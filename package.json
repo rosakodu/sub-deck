@@ -1,6 +1,6 @@
 {
   "name": "sub-deck",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "VLESS, VMess, Trojan, Shadowsocks, Hysteria 2 subscription manager for Steam Deck",
   "type": "module",
   "scripts": {

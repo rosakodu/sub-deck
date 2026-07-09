@@ -6,6 +6,40 @@ import urllib.parse
 import base64
 import subprocess
 import shutil
+import time
+import socket
+from concurrent.futures import ThreadPoolExecutor
+
+
+def tcp_ping(host, port, timeout=1.0):
+    """Возвращает время установки TCP-соединения в миллисекундах или None, если соединение провалилось."""
+    start = time.time()
+    try:
+        sock = socket.create_connection((host, port), timeout=timeout)
+        sock.close()
+        return (time.time() - start) * 1000
+    except Exception:
+        return None
+
+
+def check_nodes_ping(nodes, max_workers=30):
+    """Выполняет параллельный TCP-пинг для списка нод и возвращает отсортированный по пингу список."""
+    alive_nodes = []
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(tcp_ping, n["server"], n["port"]): n
+            for n in nodes
+        }
+        for future in futures:
+            node = futures[future]
+            latency = future.result()
+            if latency is not None:
+                node_copy = node.copy()
+                node_copy["ping"] = int(latency)
+                alive_nodes.append(node_copy)
+    # Сортируем по возрастанию пинга (от быстрых к медленным)
+    alive_nodes.sort(key=lambda x: x["ping"])
+    return alive_nodes
 
 
 class VPNManager:
@@ -54,15 +88,24 @@ class VPNManager:
         urls = settings.get("subscriptions", [])
         all_nodes = []
         
+        update_intervals = settings.setdefault("update_intervals", {})
+        last_update_times = settings.setdefault("last_update_times", {})
+        
         self.log(f"Starting parsing of all subscriptions: {len(urls)} links")
         for url in urls:
             try:
-                nodes = self.parse_subscription(url)
+                nodes, interval = self.parse_subscription(url)
                 all_nodes.extend(nodes)
+                last_update_times[url] = int(time.time())
+                if interval is not None:
+                    update_intervals[url] = int(interval)
             except Exception as e:
                 self.log(f"Failed to parse subscription {url}: {e}")
                 
-        # Сохраняем объединенные ноды в кэш
+        settings["update_intervals"] = update_intervals
+        settings["last_update_times"] = last_update_times
+        self.save_settings(settings)
+
         try:
             with open(self.nodes_cache_path, "w") as f:
                 json.dump(all_nodes, f)
@@ -82,6 +125,20 @@ class VPNManager:
             self.log(f"Added subscription URL: {url}")
         return self.parse_all_subscriptions()
 
+    def add_multiple_subscriptions(self, urls):
+        settings = self.load_settings()
+        subscriptions = settings.get("subscriptions", [])
+        updated = False
+        for url in urls:
+            if url not in subscriptions:
+                subscriptions.append(url)
+                updated = True
+        if updated:
+            settings["subscriptions"] = subscriptions
+            self.save_settings(settings)
+            self.log(f"Added multiple subscription URLs: {urls}")
+        return self.parse_all_subscriptions()
+
     def remove_subscription(self, url):
         settings = self.load_settings()
         subscriptions = settings.get("subscriptions", [])
@@ -93,8 +150,33 @@ class VPNManager:
         return self.parse_all_subscriptions()
 
     def update_subscription(self, url):
-        self.log(f"Updating subscription: {url}")
-        return self.parse_all_subscriptions()
+        self.log(f"Updating single subscription: {url}")
+        new_nodes, interval = self.parse_subscription(url)
+        
+        # Загружаем текущие ноды
+        all_nodes = self.load_nodes()
+        
+        # Фильтруем старые ноды для этого URL
+        all_nodes = [n for n in all_nodes if n.get("subscription_url") != url]
+        
+        # Добавляем новые
+        all_nodes.extend(new_nodes)
+        self.save_nodes(all_nodes)
+        
+        # Обновляем метаданные в settings
+        settings = self.load_settings()
+        last_updates = settings.get("last_update_times", {})
+        update_intervals = settings.get("update_intervals", {})
+        
+        last_updates[url] = int(time.time())
+        if interval is not None:
+             update_intervals[url] = interval
+             
+        settings["last_update_times"] = last_updates
+        settings["update_intervals"] = update_intervals
+        self.save_settings(settings)
+        
+        return all_nodes
 
 
     def save_settings(self, settings):
@@ -104,6 +186,109 @@ class VPNManager:
         except Exception:
             pass
 
+    def update_geofiles(self, force=False):
+        """Скачивает базы geosite.db и geoip.db для пресета RoscomVPN в фоне."""
+        settings = self.load_settings()
+        if settings.get("selected_preset") != "roscomvpn":
+            return False
+
+        geoip_path = os.path.join(self.settings_dir, "geoip.db")
+        geosite_path = os.path.join(self.settings_dir, "geosite.db")
+
+        now = time.time()
+        
+        need_geoip = force
+        if not need_geoip:
+            if not os.path.exists(geoip_path) or os.path.getsize(geoip_path) < 1000000:
+                need_geoip = True
+            elif now - os.path.getmtime(geoip_path) >= 6 * 3600:
+                need_geoip = True
+
+        need_geosite = force
+        if not need_geosite:
+            if not os.path.exists(geosite_path) or os.path.getsize(geosite_path) < 1000000:
+                need_geosite = True
+            elif now - os.path.getmtime(geosite_path) >= 6 * 3600:
+                need_geosite = True
+
+        updated = False
+        import shutil
+
+        # Сначала пробуем скопировать из defaults, если файлы в settings отсутствуют или битые
+        default_geoip_path = os.path.join(self.plugin_dir, "defaults", "geoip.db")
+        default_geosite_path = os.path.join(self.plugin_dir, "defaults", "geosite.db")
+
+        if need_geoip and os.path.exists(default_geoip_path) and os.path.getsize(default_geoip_path) >= 1000000:
+            self.log("Copying geoip.db from plugin defaults...")
+            try:
+                shutil.copy2(default_geoip_path, geoip_path)
+                self.log("geoip.db copied successfully from defaults.")
+                need_geoip = False
+                updated = True
+            except Exception as e:
+                self.log(f"Failed to copy geoip.db from defaults: {e}")
+
+        if need_geosite and os.path.exists(default_geosite_path) and os.path.getsize(default_geosite_path) >= 1000000:
+            self.log("Copying geosite.db from plugin defaults...")
+            try:
+                shutil.copy2(default_geosite_path, geosite_path)
+                self.log("geosite.db copied successfully from defaults.")
+                need_geosite = False
+                updated = True
+            except Exception as e:
+                self.log(f"Failed to copy geosite.db from defaults: {e}")
+
+        import ssl
+        ctx = ssl._create_unverified_context()
+
+        if need_geoip:
+            self.log("Downloading geoip.db from SagerNet...")
+            try:
+                req = urllib.request.Request(
+                    "https://github.com/SagerNet/sing-geoip/releases/latest/download/geoip.db",
+                    headers={"User-Agent": "Mozilla/5.0"}
+                )
+                with urllib.request.urlopen(req, timeout=30, context=ctx) as resp:
+                    data = resp.read()
+                    if len(data) < 1000000:
+                        raise ValueError(f"Downloaded file is too small: {len(data)} bytes")
+                    with open(geoip_path, "wb") as f:
+                        f.write(data)
+                self.log("geoip.db downloaded successfully.")
+                updated = True
+            except Exception as e:
+                self.log(f"Failed to download geoip.db: {e}")
+                if os.path.exists(geoip_path):
+                    try:
+                        os.remove(geoip_path)
+                    except Exception:
+                        pass
+
+        if need_geosite:
+            self.log("Downloading geosite.db from SagerNet...")
+            try:
+                req = urllib.request.Request(
+                    "https://github.com/SagerNet/sing-geosite/releases/latest/download/geosite.db",
+                    headers={"User-Agent": "Mozilla/5.0"}
+                )
+                with urllib.request.urlopen(req, timeout=30, context=ctx) as resp:
+                    data = resp.read()
+                    if len(data) < 1000000:
+                        raise ValueError(f"Downloaded file is too small: {len(data)} bytes")
+                    with open(geosite_path, "wb") as f:
+                        f.write(data)
+                self.log("geosite.db downloaded successfully.")
+                updated = True
+            except Exception as e:
+                self.log(f"Failed to download geosite.db: {e}")
+                if os.path.exists(geosite_path):
+                    try:
+                        os.remove(geosite_path)
+                    except Exception:
+                        pass
+
+        return updated
+
     def get_nodes(self):
         if os.path.exists(self.nodes_cache_path):
             try:
@@ -112,6 +297,18 @@ class VPNManager:
             except Exception:
                 pass
         return []
+
+    def load_nodes(self):
+        return self.get_nodes()
+
+    def save_nodes(self, nodes):
+        try:
+            with open(self.nodes_cache_path, "w") as f:
+                json.dump(nodes, f)
+            self.log(f"Saved total of {len(nodes)} nodes to cache.")
+        except Exception as e:
+            self.log(f"Failed to save nodes to cache: {e}")
+
 
     # ────────────────────────────────────────────────
     # Загрузка sing-box
@@ -163,16 +360,12 @@ class VPNManager:
     # ────────────────────────────────────────────────
 
     def _do_http_get(self, url, user_agent):
-        """Выполняет HTTP GET запрос, возвращает bytes."""
+        """Выполняет HTTP GET запрос, возвращает (bytes, headers)."""
         import ssl
-        # _create_unverified_context гарантированно отключает проверку SSL
-        # в любой версии Python/OpenSSL на SteamOS
         ctx = ssl._create_unverified_context()
         req = urllib.request.Request(url, headers={"User-Agent": user_agent})
         with urllib.request.urlopen(req, timeout=15, context=ctx) as resp:
-            return resp.read()
-
-
+            return resp.read(), resp.info()
 
     def fetch_raw(self, url):
         """Скачивает подписку и возвращает сырой текст для диагностики."""
@@ -180,7 +373,7 @@ class VPNManager:
                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"]
         for ua in user_agents:
             try:
-                data = self._do_http_get(url, ua)
+                data, _ = self._do_http_get(url, ua)
                 text = data.decode("utf-8", errors="replace").strip()
                 return f"UA={ua} | len={len(text)} | content={repr(text[:500])}"
             except Exception as e:
@@ -188,7 +381,7 @@ class VPNManager:
         return f"ALL FAILED: {last}"
 
     def parse_subscription(self, url):
-        """Скачивает подписку по URL и парсит ноды VLESS."""
+        """Скачивает подписку по URL и парсит ноды VLESS, отбирая топ-15 лучших по пингу."""
         import traceback
 
         user_agents = [
@@ -198,11 +391,12 @@ class VPNManager:
         ]
 
         content = None
+        headers = None
         last_error = None
 
         for ua in user_agents:
             try:
-                content = self._do_http_get(url, ua)
+                content, headers = self._do_http_get(url, ua)
                 self.log(f"Downloaded {len(content)} bytes with UA={ua}")
                 break
             except Exception as e:
@@ -212,12 +406,34 @@ class VPNManager:
         if content is None:
             self.log(f"parse_subscription FAILED: {last_error}")
             self.log(traceback.format_exc())
-            return []
+            return [], None
+
+        # Читаем интервал обновления из заголовков
+        update_interval = None
+        if headers:
+            for h_key, h_val in headers.items():
+                if h_key.lower() == "profile-update-interval":
+                    try:
+                        update_interval = int(h_val)
+                        self.log(f"Found profile-update-interval header: {update_interval} hours")
+                    except Exception:
+                        pass
 
         try:
             text = content.decode("utf-8").strip()
         except Exception:
             text = content.decode("latin-1").strip()
+
+        # Если интервал не найден в заголовках, ищем его в тексте
+        if update_interval is None:
+            import re
+            match = re.search(r'(?:#|//)?\s*profile-update-interval\s*:\s*(\d+)', text[:1000], re.IGNORECASE)
+            if match:
+                try:
+                    update_interval = int(match.group(1))
+                    self.log(f"Found profile-update-interval in file content: {update_interval} hours")
+                except Exception:
+                    pass
 
         # Определяем формат: plain text или base64
         supported_schemes = ("vless://", "vmess://", "trojan://", "ss://", "hysteria2://", "hy2://")
@@ -229,7 +445,6 @@ class VPNManager:
             self.log(f"Plain-text format, {len(lines)} lines")
         else:
             try:
-                # Убираем пробелы для корректного base64
                 clean_b64 = "".join(text.split())
                 padded = clean_b64 + "=" * (-len(clean_b64) % 4)
                 decoded = base64.b64decode(padded).decode("utf-8")
@@ -261,17 +476,56 @@ class VPNManager:
                     parsed_node = self._parse_hysteria2_link(line)
                 
                 if parsed_node:
+                    parsed_node["subscription_url"] = url
                     nodes.append(parsed_node)
             except Exception as e:
                 self.log(f"Failed to parse line: {repr(line[:60])}: {e}")
 
+        # Дедупликация нод по имени и адресу (server:port)
+        seen_names = set()
+        seen_endpoints = set()
+        unique_nodes = []
+        for n in nodes:
+            name = n.get("name")
+            endpoint = (n.get("server"), n.get("port"))
+            if name and endpoint[0] and endpoint[1]:
+                if name not in seen_names and endpoint not in seen_endpoints:
+                    seen_names.add(name)
+                    seen_endpoints.add(endpoint)
+                    unique_nodes.append(n)
+        nodes = unique_nodes
+
         self.log(f"Protocols found: {proto_count}")
-        self.log(f"Parsed {len(nodes)} total nodes")
+        self.log(f"Parsed {len(nodes)} total unique nodes")
 
-        with open(self.nodes_cache_path, "w") as f:
-            json.dump(nodes, f)
+        # Интеллектуальный отбор топ лучших нод по пингу (5 для Free Subscriptions, 15 для обычных)
+        is_free_sub = (
+            "igareck/vpn-configs-for-russia" in url or
+            "AvenCores/goida-vpn-configs" in url or
+            "zieng2/wl" in url
+        )
+        limit_nodes = 5 if is_free_sub else 15
+        if nodes:
+            try:
+                sample_size = min(len(nodes), 50)
+                import random
+                sampled_nodes = random.sample(nodes, sample_size)
+                self.log(f"Running parallel TCP ping for {sample_size} nodes...")
+                
+                alive_nodes = check_nodes_ping(sampled_nodes)
+                self.log(f"Ping finished. Found {len(alive_nodes)} responsive nodes out of {sample_size}.")
+                
+                if alive_nodes:
+                    nodes = alive_nodes[:limit_nodes]
+                else:
+                    nodes = nodes[:limit_nodes]
+            except Exception as e:
+                self.log(f"Error during ping selection: {e}")
+                nodes = nodes[:limit_nodes]
+        else:
+            nodes = []
 
-        return nodes
+        return nodes, update_interval
 
     def _parse_endpoint(self, endpoint):
         """Парсит host:port, поддерживает IPv6 [::1]:port."""
@@ -577,6 +831,61 @@ class VPNManager:
 
 
 
+        settings = self.load_settings()
+        preset = settings.get("selected_preset", "default")
+        self.log(f"Generating config with routing preset: {preset}")
+
+        outbounds = [
+            outbound,
+            {"type": "direct", "tag": "direct"},
+            {"type": "dns", "tag": "dns-out"},
+            {"type": "block", "tag": "block"},
+        ]
+
+        route_config = {
+            "auto_detect_interface": True
+        }
+
+        if preset == "roscomvpn":
+            geoip_path = os.path.join(self.settings_dir, "geoip.db")
+            geosite_path = os.path.join(self.settings_dir, "geosite.db")
+            
+            route_config["geoip"] = {
+                "path": geoip_path,
+                "download_url": "https://github.com/SagerNet/sing-geoip/releases/latest/download/geoip.db",
+                "download_detour": "direct"
+            }
+            route_config["geosite"] = {
+                "path": geosite_path,
+                "download_url": "https://github.com/SagerNet/sing-geosite/releases/latest/download/geosite.db",
+                "download_detour": "direct"
+            }
+
+            route_config["rules"] = [
+                {"protocol": "dns", "outbound": "dns-out"},
+                {"ip_is_private": True, "outbound": "direct"},
+                {"geosite": ["category-ads-all"], "outbound": "block"},
+                {"geosite": ["google-play", "github", "youtube", "telegram"], "outbound": "proxy"},
+                {"geosite": ["private", "category-ru", "microsoft", "apple", "epicgames", "riot", "steam", "twitch", "pinterest"], "outbound": "direct"},
+                {"domain_suffix": ["escapefromtarkov.com", "tarkov.com", "faceit.com", "fastcup.net"], "outbound": "direct"},
+                {"geoip": ["private", "ru", "by"], "outbound": "direct"},
+                {"protocol": ["bittorrent"], "outbound": "direct"}
+            ]
+        else:
+            route_config["rules"] = [
+                {"protocol": "dns", "outbound": "dns-out"},
+                {"ip_is_private": True, "outbound": "direct"},
+                {"protocol": ["bittorrent"], "outbound": "direct"}
+            ]
+
+        dns_rules = [
+            {"query_type": ["A", "AAAA"], "server": "dns_proxy"},
+        ]
+        if preset == "roscomvpn":
+            dns_rules = [
+                {"geosite": ["google-play", "github", "youtube", "telegram"], "server": "dns_proxy"}
+            ]
+
         config = {
             "log": {"level": "info", "timestamp": True},
             "dns": {
@@ -584,17 +893,13 @@ class VPNManager:
                     {"tag": "dns_direct", "address": "1.1.1.1", "detour": "direct"},
                     {"tag": "dns_proxy", "address": "8.8.8.8", "detour": "proxy"},
                 ],
-                "rules": [
-                    {"outbound": "any", "server": "dns_direct"},
-                    {"query_type": ["A", "AAAA"], "server": "dns_proxy"},
-                ],
+                "rules": dns_rules,
             },
             "inbounds": [
                 {
                     "type": "tun",
                     "tag": "tun-in",
                     "interface_name": "tun0",
-                    # sing-box 1.9+ использует inet4_address вместо address
                     "inet4_address": "172.19.0.1/30",
                     "auto_route": True,
                     "strict_route": True,
@@ -602,18 +907,8 @@ class VPNManager:
                     "sniff": True,
                 }
             ],
-            "outbounds": [
-                outbound,
-                {"type": "direct", "tag": "direct"},
-                {"type": "dns", "tag": "dns-out"},
-            ],
-            "route": {
-                "rules": [
-                    {"protocol": "dns", "outbound": "dns-out"},
-                    {"ip_is_private": True, "outbound": "direct"}
-                ],
-                "auto_detect_interface": True,
-            },
+            "outbounds": outbounds,
+            "route": route_config,
         }
 
         with open(self.config_path, "w") as f:
@@ -645,6 +940,15 @@ class VPNManager:
         if not self.download_singbox():
             self.log("sing-box not available, aborting start")
             return False
+
+        # Убедимся, что базы скачаны, если выбран пресет RoscomVPN
+        settings = self.load_settings()
+        if settings.get("selected_preset") == "roscomvpn":
+            self.log("Preset is RoscomVPN. Checking and updating geofiles...")
+            try:
+                self.update_geofiles(False)
+            except Exception as e:
+                self.log(f"Failed to update geofiles before start: {e}")
 
         self.generate_config(node)
 

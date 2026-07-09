@@ -1,5 +1,6 @@
 {
   "name": "sub-deck",
+  "version": "1.0.2",
   "author": "rosakodu",
   "flags": [
     "root"
