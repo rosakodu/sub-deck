@@ -4,7 +4,7 @@
 
 إضافة لـ Decky Loader على جهاز Steam Deck تتيح لك إدارة اشتراكات VLESS و VMess و Trojan و Shadowsocks و Hysteria 2 والاتصال بها مع توجيه TUN التلقائي على مستوى النظام باستخدام `sing-box`.
 
-![Screenshot](assets/screenshot.png)
+![Screenshot](assets/screenshot.png?v=2)
 
 ## 📋 الميزات
 

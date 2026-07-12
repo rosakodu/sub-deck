@@ -4,7 +4,7 @@
 
 Steam Deck için Decky Loader eklentisi. VLESS, VMess, Trojan, Shadowsocks ve Hysteria 2 aboneliklerinizi yönetmenizi ve `sing-box` kullanarak otomatik sistem genelinde TUN yönlendirmesiyle bunlara bağlanmanızı sağlar.
 
-![Screenshot](assets/screenshot.png)
+![Screenshot](assets/screenshot.png?v=2)
 
 ## 📋 Özellikler
 

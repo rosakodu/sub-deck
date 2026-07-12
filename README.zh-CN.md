@@ -4,7 +4,7 @@
 
 Steam Deck 的 Decky Loader 插件，允许您管理 VLESS、VMess、Trojan、Shadowsocks 和 Hysteria 2 订阅，并使用 `sing-box` 通过自动系统级 TUN 路由连接它们。
 
-![Screenshot](assets/screenshot.png)
+![Screenshot](assets/screenshot.png?v=2)
 
 ## 📋 功能特性
 
