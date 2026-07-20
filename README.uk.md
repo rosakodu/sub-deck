@@ -4,7 +4,7 @@
 
 Плагін для Decky Loader на Steam Deck, що дозволяє зручно керувати підписками VLESS, VMess, Trojan, Shadowsocks та Hysteria 2, а також підключатися до них з автоматичним системним TUN-тунелюванням усього трафіку через `sing-box`.
 
-![Screenshot](assets/screenshot.png?v=2)
+![Screenshot](assets/screenshot.png?v=3)
 
 ## 📋 Можливості
 

@@ -4,7 +4,7 @@
 
 A Decky Loader plugin for Steam Deck that allows you to manage VLESS, VMess, Trojan, Shadowsocks, and Hysteria 2 subscriptions and connect to them with automatic system-wide TUN routing using `sing-box`.
 
-![Screenshot](assets/screenshot.png?v=2)
+![Screenshot](assets/screenshot.png?v=3)
 
 ## 📋 Features
 

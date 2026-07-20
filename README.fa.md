@@ -4,7 +4,7 @@
 
 یک افزونه Decky Loader برای Steam Deck که به شما امکان می‌دهد اشتراک‌های VLESS، VMess، Trojan، Shadowsocks و Hysteria 2 را مدیریت کرده و با مسیریابی خودکار سیستمی TUN با استفاده از `sing-box` به آن‌ها متصل شوید.
 
-![Screenshot](assets/screenshot.png?v=2)
+![Screenshot](assets/screenshot.png?v=3)
 
 ## 📋 ویژگی‌ها
 
