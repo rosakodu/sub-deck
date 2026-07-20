@@ -1,6 +1,6 @@
 # sub-deck
 
-[English](README.md) | [Русский](README.ru.md) | [Українська](README.uk.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md) | [العربية](README.ar.md) | [فارسی](README.fa.md) | [Türkçe](README.tr.md)
+[🇺🇸 English](README.md) | [🇷🇺 Русский](README.ru.md) | [🇺🇦 Українська](README.uk.md) | [🇨🇳 简体中文](README.zh-CN.md) | [🇹🇼 繁體中文](README.zh-TW.md) | [🇸🇦 العربية](README.ar.md) | [🇮🇷 فارسی](README.fa.md) | [🇹🇷 Türkçe](README.tr.md)
 
 Steam Deck 的 Decky Loader 外掛程式，讓您能夠管理 VLESS、VMess、Trojan、Shadowsocks 和 Hysteria 2 訂閱，並使用 `sing-box` 透過自動系統級 TUN 路由連接它們。
 

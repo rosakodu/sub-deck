@@ -1,6 +1,6 @@
 # sub-deck
 
-[English](README.md) | [Русский](README.ru.md) | [Українська](README.uk.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md) | [العربية](README.ar.md) | [فارسی](README.fa.md) | [Türkçe](README.tr.md)
+[🇺🇸 English](README.md) | [🇷🇺 Русский](README.ru.md) | [🇺🇦 Українська](README.uk.md) | [🇨🇳 简体中文](README.zh-CN.md) | [🇹🇼 繁體中文](README.zh-TW.md) | [🇸🇦 العربية](README.ar.md) | [🇮🇷 فارسی](README.fa.md) | [🇹🇷 Türkçe](README.tr.md)
 
 یک افزونه Decky Loader برای Steam Deck که به شما امکان می‌دهد اشتراک‌های VLESS، VMess، Trojan، Shadowsocks و Hysteria 2 را مدیریت کرده و با مسیریابی خودکار سیستمی TUN با استفاده از `sing-box` به آن‌ها متصل شوید.
 
