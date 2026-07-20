@@ -1,6 +1,6 @@
 # sub-deck
 
-[English](README.md) | [Русский](README.ru.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md) | [العربية](README.ar.md) | [فارسی](README.fa.md) | [Türkçe](README.tr.md)
+[English](README.md) | [Русский](README.ru.md) | [Українська](README.uk.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md) | [العربية](README.ar.md) | [فارسی](README.fa.md) | [Türkçe](README.tr.md)
 
 إضافة لـ Decky Loader على جهاز Steam Deck تتيح لك إدارة اشتراكات VLESS و VMess و Trojan و Shadowsocks و Hysteria 2 والاتصال بها مع توجيه TUN التلقائي على مستوى النظام باستخدام `sing-box`.
 
