@@ -3,6 +3,7 @@ import {
   PanelSection,
   PanelSectionRow,
   TextField,
+  Navigation,
   staticClasses
 } from "@decky/ui";
 import {
@@ -74,7 +75,8 @@ type TranslationKeys =
   | "presetRoscom"
   | "addFreeBtn"
   | "loadedNodesForSub"
-  | "freeConfigsUpdated";
+  | "freeConfigsUpdated"
+  | "supportBtn";
 
 const translations: Record<string, Record<TranslationKeys, string>> = {
   english: {
@@ -107,7 +109,8 @@ const translations: Record<string, Record<TranslationKeys, string>> = {
     presetRoscom: "RoscomVPN",
     addFreeBtn: "Free Subscriptions",
     loadedNodesForSub: "Subscription nodes updated: {count}",
-    freeConfigsUpdated: "Free subscriptions updated"
+    freeConfigsUpdated: "Free subscriptions updated",
+    supportBtn: "Support"
   },
   russian: {
     title: "Управление VLESS",
@@ -139,7 +142,8 @@ const translations: Record<string, Record<TranslationKeys, string>> = {
     presetRoscom: "RoscomVPN",
     addFreeBtn: "Бесплатные подписки",
     loadedNodesForSub: "Обновлено нод в этой подписке: {count}",
-    freeConfigsUpdated: "Бесплатные подписки обновлены"
+    freeConfigsUpdated: "Бесплатные подписки обновлены",
+    supportBtn: "Поддержка"
   },
   schinese: {
     title: "VLESS 管理",
@@ -171,7 +175,8 @@ const translations: Record<string, Record<TranslationKeys, string>> = {
     presetRoscom: "RoscomVPN",
     addFreeBtn: "免费订阅",
     loadedNodesForSub: "此订阅已更新节点: {count}",
-    freeConfigsUpdated: "免费订阅已更新"
+    freeConfigsUpdated: "免费订阅已更新",
+    supportBtn: "支持"
   },
   tchinese: {
     title: "VLESS 管理",
@@ -203,7 +208,8 @@ const translations: Record<string, Record<TranslationKeys, string>> = {
     presetRoscom: "RoscomVPN",
     addFreeBtn: "免費訂閱",
     loadedNodesForSub: "此訂閱已更新節點: {count}",
-    freeConfigsUpdated: "免費訂閱已更新"
+    freeConfigsUpdated: "免費訂閱已更新",
+    supportBtn: "支援"
   },
   arabic: {
     title: "إدارة VLESS",
@@ -235,7 +241,8 @@ const translations: Record<string, Record<TranslationKeys, string>> = {
     presetRoscom: "RoscomVPN",
     addFreeBtn: "اشتراكات مجانية",
     loadedNodesForSub: "تم تحديث عقد الاشتراك: {count}",
-    freeConfigsUpdated: "تم تحديث الاشتراكات المجانية"
+    freeConfigsUpdated: "تم تحديث الاشتراكات المجانية",
+    supportBtn: "الدعم"
   },
   persian: {
     title: "مدیریت VLESS",
@@ -267,7 +274,8 @@ const translations: Record<string, Record<TranslationKeys, string>> = {
     presetRoscom: "RoscomVPN",
     addFreeBtn: "اشتراک‌های رایگان",
     loadedNodesForSub: "گره‌های اشتراک به‌روزرسانی شد: {count}",
-    freeConfigsUpdated: "اشتراک‌های رایگان به‌روزرسانی شدند"
+    freeConfigsUpdated: "اشتراک‌های رایگان به‌روزرسانی شدند",
+    supportBtn: "پشتیبانی"
   },
   turkish: {
     title: "VPN Yapılandırmaları",
@@ -299,7 +307,8 @@ const translations: Record<string, Record<TranslationKeys, string>> = {
     presetRoscom: "RoscomVPN",
     addFreeBtn: "Ücretsiz Abonelikler",
     loadedNodesForSub: "Bu abonelikteki sunucular güncellendi: {count}",
-    freeConfigsUpdated: "Ücretsiz abonelikler güncellendi"
+    freeConfigsUpdated: "Ücretsiz abonelikler güncellendi",
+    supportBtn: "Destek"
   }
 };
 
@@ -876,6 +885,22 @@ function Content() {
           disabled={loading}
         >
           {t("logButton")}
+        </ButtonItem>
+      </PanelSectionRow>
+
+      {/* Кнопка Поддержка */}
+      <PanelSectionRow>
+        <ButtonItem
+          layout="below"
+          onClick={() => {
+            if (Navigation?.NavigateToExternalWeb) {
+              Navigation.NavigateToExternalWeb("https://vk.ru/valvesteamdeck");
+            } else {
+              window.open("https://vk.ru/valvesteamdeck", "_blank");
+            }
+          }}
+        >
+          {t("supportBtn")}
         </ButtonItem>
       </PanelSectionRow>
     </PanelSection>
