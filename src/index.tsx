@@ -646,8 +646,12 @@ function Content() {
     try {
       const raw = await exportLogs();
       const text = (raw as any)?.result ?? raw;
-      if (navigator.clipboard) {
-        await navigator.clipboard.writeText(text);
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+        try {
+          await navigator.clipboard.writeText(text);
+        } catch (clipErr) {
+          console.warn("Clipboard write not allowed:", clipErr);
+        }
       }
       toaster.toast({
         title: t("logCreatedTitle"),
