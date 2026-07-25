@@ -76,7 +76,9 @@ type TranslationKeys =
   | "addFreeBtn"
   | "loadedNodesForSub"
   | "freeConfigsUpdated"
-  | "supportBtn";
+  | "supportBtn"
+  | "logCreatedTitle"
+  | "logCreated";
 
 const translations: Record<string, Record<TranslationKeys, string>> = {
   english: {
@@ -110,7 +112,9 @@ const translations: Record<string, Record<TranslationKeys, string>> = {
     addFreeBtn: "Free Subscriptions",
     loadedNodesForSub: "Subscription nodes updated: {count}",
     freeConfigsUpdated: "Free subscriptions updated",
-    supportBtn: "Support"
+    supportBtn: "Support",
+    logCreatedTitle: "Log Created",
+    logCreated: "Log saved to sub-deck.log"
   },
   russian: {
     title: "Управление VLESS",
@@ -143,7 +147,9 @@ const translations: Record<string, Record<TranslationKeys, string>> = {
     addFreeBtn: "Бесплатные подписки",
     loadedNodesForSub: "Обновлено нод в этой подписке: {count}",
     freeConfigsUpdated: "Бесплатные подписки обновлены",
-    supportBtn: "Поддержка"
+    supportBtn: "Поддержка",
+    logCreatedTitle: "Лог создан",
+    logCreated: "Лог сохранен в sub-deck.log"
   },
   schinese: {
     title: "VLESS 管理",
@@ -176,7 +182,9 @@ const translations: Record<string, Record<TranslationKeys, string>> = {
     addFreeBtn: "免费订阅",
     loadedNodesForSub: "此订阅已更新节点: {count}",
     freeConfigsUpdated: "免费订阅已更新",
-    supportBtn: "支持"
+    supportBtn: "支持",
+    logCreatedTitle: "日志已创建",
+    logCreated: "日志已保存至 sub-deck.log"
   },
   tchinese: {
     title: "VLESS 管理",
@@ -209,7 +217,9 @@ const translations: Record<string, Record<TranslationKeys, string>> = {
     addFreeBtn: "免費訂閱",
     loadedNodesForSub: "此訂閱已更新節點: {count}",
     freeConfigsUpdated: "免費訂閱已更新",
-    supportBtn: "支援"
+    supportBtn: "支援",
+    logCreatedTitle: "日誌已建立",
+    logCreated: "日誌已儲存至 sub-deck.log"
   },
   arabic: {
     title: "إدارة VLESS",
@@ -242,7 +252,9 @@ const translations: Record<string, Record<TranslationKeys, string>> = {
     addFreeBtn: "اشتراكات مجانية",
     loadedNodesForSub: "تم تحديث عقد الاشتراك: {count}",
     freeConfigsUpdated: "تم تحديث الاشتراكات المجانية",
-    supportBtn: "الدعم"
+    supportBtn: "الدعم",
+    logCreatedTitle: "تم إنشاء السجل",
+    logCreated: "تم حفظ السجل في sub-deck.log"
   },
   persian: {
     title: "مدیریت VLESS",
@@ -275,7 +287,9 @@ const translations: Record<string, Record<TranslationKeys, string>> = {
     addFreeBtn: "اشتراک‌های رایگان",
     loadedNodesForSub: "گره‌های اشتراک به‌روزرسانی شد: {count}",
     freeConfigsUpdated: "اشتراک‌های رایگان به‌روزرسانی شدند",
-    supportBtn: "پشتیبانی"
+    supportBtn: "پشتیبانی",
+    logCreatedTitle: "لاگ ایجاد شد",
+    logCreated: "لاگ در sub-deck.log ذخیره شد"
   },
   turkish: {
     title: "VPN Yapılandırmaları",
@@ -308,7 +322,9 @@ const translations: Record<string, Record<TranslationKeys, string>> = {
     addFreeBtn: "Ücretsiz Abonelikler",
     loadedNodesForSub: "Bu abonelikteki sunucular güncellendi: {count}",
     freeConfigsUpdated: "Ücretsiz abonelikler güncellendi",
-    supportBtn: "Destek"
+    supportBtn: "Destek",
+    logCreatedTitle: "Günlük Oluşturuldu",
+    logCreated: "Günlük sub-deck.log dosyasına kaydedildi"
   }
 };
 
@@ -626,14 +642,21 @@ function Content() {
   };
 
   const handleExportLogs = async () => {
+    setLoading(true);
     try {
       const raw = await exportLogs();
       const text = (raw as any)?.result ?? raw;
       if (navigator.clipboard) {
         await navigator.clipboard.writeText(text);
       }
+      toaster.toast({
+        title: t("logCreatedTitle"),
+        body: t("logCreated")
+      });
     } catch (err) {
-      console.error("Export logs error:", err);
+      toaster.toast({ title: t("error"), body: `${err}` });
+    } finally {
+      setLoading(false);
     }
   };
 
