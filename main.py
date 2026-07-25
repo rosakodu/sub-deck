@@ -144,22 +144,31 @@ class Plugin:
     async def export_logs(self) -> str:
         """Экспортирует объединенные логи в /home/deck/sub-deck.log и возвращает их."""
         def _export():
-            plugin_log_path = "/home/deck/homebrew/logs/sub-deck/sub-deck.log"
-            singbox_log_path = os.path.join(self.vpn.settings_dir, "sing-box.log")
+            user_home = get_user_home()
+            possible_log_paths = [
+                os.path.join(user_home, ".homebrew", "logs", "sub-deck", "main.log"),
+                os.path.join(user_home, "homebrew", "logs", "sub-deck", "main.log"),
+                os.path.join(user_home, ".local", "share", "decky-loader", "logs", "sub-deck", "main.log"),
+                "/home/deck/.homebrew/logs/sub-deck/main.log",
+                "/home/deck/homebrew/logs/sub-deck/main.log",
+            ]
             
             plugin_logs = "--- No sub-deck logs found ---"
-            if os.path.exists(plugin_log_path):
-                try:
-                    with open(plugin_log_path, "r", errors="replace") as f:
-                        lines = f.readlines()
-                        plugin_logs = "".join(lines[-250:]) # Последние 250 строк
-                except Exception as e:
-                    plugin_logs = f"Error reading sub-deck logs: {e}"
-            
+            for log_path in possible_log_paths:
+                if os.path.exists(log_path):
+                    try:
+                        with open(log_path, "r", errors="replace", encoding="utf-8") as f:
+                            lines = f.readlines()
+                            plugin_logs = "".join(lines[-250:]) # Последние 250 строк
+                            break
+                    except Exception as e:
+                        plugin_logs = f"Error reading sub-deck logs from {log_path}: {e}"
+
+            singbox_log_path = os.path.join(self.vpn.settings_dir, "sing-box.log")
             singbox_logs = "--- No sing-box logs found ---"
             if os.path.exists(singbox_log_path):
                 try:
-                    with open(singbox_log_path, "r", errors="replace") as f:
+                    with open(singbox_log_path, "r", errors="replace", encoding="utf-8") as f:
                         lines = f.readlines()
                         singbox_logs = "".join(lines[-250:]) # Последние 250 строк
                 except Exception as e:
@@ -173,7 +182,7 @@ class Plugin:
             )
             
             # Сохраняем в доступное место на Steam Deck
-            export_path = "/home/deck/sub-deck.log"
+            export_path = os.path.join(user_home, "sub-deck.log")
             try:
                 with open(export_path, "w", encoding="utf-8") as f:
                     f.write(combined)
@@ -260,12 +269,12 @@ class Plugin:
         if hasattr(self, "update_task"):
             self.update_task.cancel()
         if hasattr(self, "vpn"):
-            self.vpn.stop()
+            await self.loop.run_in_executor(None, self.vpn.stop)
         decky.logger.info("sub-deck unloaded")
 
     async def _uninstall(self):
         if hasattr(self, "vpn"):
-            self.vpn.stop()
+            await self.loop.run_in_executor(None, self.vpn.stop)
         decky.logger.info("sub-deck uninstalled")
 
     async def _migration(self):

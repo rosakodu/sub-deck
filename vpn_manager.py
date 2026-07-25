@@ -516,7 +516,17 @@ class VPNManager:
                 self.log(f"Ping finished. Found {len(alive_nodes)} responsive nodes out of {sample_size}.")
                 
                 if alive_nodes:
-                    nodes = alive_nodes[:limit_nodes]
+                    selected = alive_nodes[:limit_nodes]
+                    if len(selected) < limit_nodes:
+                        seen_endpoints = {(n["server"], n["port"]) for n in selected}
+                        for n in nodes:
+                            endpoint = (n["server"], n["port"])
+                            if endpoint not in seen_endpoints:
+                                selected.append(n)
+                                seen_endpoints.add(endpoint)
+                                if len(selected) >= limit_nodes:
+                                    break
+                    nodes = selected
                 else:
                     nodes = nodes[:limit_nodes]
             except Exception as e:
@@ -580,12 +590,20 @@ class VPNManager:
     def _parse_vmess_link(self, link):
         """Парсинг vmess:// ссылки (Base64 JSON)."""
         try:
-            b64_data = link[8:].strip()
+            raw_b64 = link[8:].strip()
+            fragment_name = ""
+            if "#" in raw_b64:
+                raw_b64, frag = raw_b64.split("#", 1)
+                fragment_name = urllib.parse.unquote(frag.strip())
+            if "?" in raw_b64:
+                raw_b64 = raw_b64.split("?", 1)[0]
+
+            b64_data = raw_b64.strip()
             padded = b64_data + "=" * (-len(b64_data) % 4)
             raw_json = base64.b64decode(padded).decode("utf-8")
             data = json.loads(raw_json)
             
-            name = data.get("ps", f"VMess {data.get('add')}:{data.get('port')}")
+            name = data.get("ps") or fragment_name or f"VMess {data.get('add')}:{data.get('port')}"
             tls_val = data.get("tls", "")
             security = "tls" if tls_val == "tls" else "none"
             
@@ -850,27 +868,46 @@ class VPNManager:
             geoip_path = os.path.join(self.settings_dir, "geoip.db")
             geosite_path = os.path.join(self.settings_dir, "geosite.db")
             
-            route_config["geoip"] = {
-                "path": geoip_path,
-                "download_url": "https://github.com/SagerNet/sing-geoip/releases/latest/download/geoip.db",
-                "download_detour": "direct"
-            }
-            route_config["geosite"] = {
-                "path": geosite_path,
-                "download_url": "https://github.com/SagerNet/sing-geosite/releases/latest/download/geosite.db",
-                "download_detour": "direct"
-            }
+            has_geoip = os.path.exists(geoip_path) and os.path.getsize(geoip_path) > 100000
+            has_geosite = os.path.exists(geosite_path) and os.path.getsize(geosite_path) > 100000
 
-            route_config["rules"] = [
-                {"protocol": "dns", "outbound": "dns-out"},
-                {"ip_is_private": True, "outbound": "direct"},
-                {"geosite": ["category-ads-all"], "outbound": "block"},
-                {"geosite": ["google-play", "github", "youtube", "telegram"], "outbound": "proxy"},
-                {"geosite": ["private", "category-ru", "microsoft", "apple", "epicgames", "riot", "steam", "twitch", "pinterest"], "outbound": "direct"},
-                {"domain_suffix": ["escapefromtarkov.com", "tarkov.com", "faceit.com", "fastcup.net"], "outbound": "direct"},
-                {"geoip": ["private", "ru", "by"], "outbound": "direct"},
-                {"protocol": ["bittorrent"], "outbound": "direct"}
-            ]
+            if not (has_geoip and has_geosite):
+                try:
+                    self.update_geofiles(force=True)
+                except Exception as e:
+                    self.log(f"Failed to update geofiles: {e}")
+                has_geoip = os.path.exists(geoip_path) and os.path.getsize(geoip_path) > 100000
+                has_geosite = os.path.exists(geosite_path) and os.path.getsize(geosite_path) > 100000
+
+            if has_geoip and has_geosite:
+                route_config["geoip"] = {
+                    "path": geoip_path,
+                    "download_url": "https://github.com/SagerNet/sing-geoip/releases/latest/download/geoip.db",
+                    "download_detour": "direct"
+                }
+                route_config["geosite"] = {
+                    "path": geosite_path,
+                    "download_url": "https://github.com/SagerNet/sing-geosite/releases/latest/download/geosite.db",
+                    "download_detour": "direct"
+                }
+
+                route_config["rules"] = [
+                    {"protocol": "dns", "outbound": "dns-out"},
+                    {"ip_is_private": True, "outbound": "direct"},
+                    {"geosite": ["category-ads-all"], "outbound": "block"},
+                    {"geosite": ["google-play", "github", "youtube", "telegram"], "outbound": "proxy"},
+                    {"geosite": ["private", "category-ru", "microsoft", "apple", "epicgames", "riot", "steam", "twitch", "pinterest"], "outbound": "direct"},
+                    {"domain_suffix": ["escapefromtarkov.com", "tarkov.com", "faceit.com", "fastcup.net"], "outbound": "direct"},
+                    {"geoip": ["private", "ru", "by"], "outbound": "direct"},
+                    {"protocol": ["bittorrent"], "outbound": "direct"}
+                ]
+            else:
+                self.log("Geofiles unavailable, falling back to default routing rules")
+                route_config["rules"] = [
+                    {"protocol": "dns", "outbound": "dns-out"},
+                    {"ip_is_private": True, "outbound": "direct"},
+                    {"protocol": ["bittorrent"], "outbound": "direct"}
+                ]
         else:
             route_config["rules"] = [
                 {"protocol": "dns", "outbound": "dns-out"},
@@ -881,7 +918,7 @@ class VPNManager:
         dns_rules = [
             {"query_type": ["A", "AAAA"], "server": "dns_proxy"},
         ]
-        if preset == "roscomvpn":
+        if preset == "roscomvpn" and os.path.exists(os.path.join(self.settings_dir, "geosite.db")):
             dns_rules = [
                 {"geosite": ["google-play", "github", "youtube", "telegram"], "server": "dns_proxy"}
             ]
@@ -891,7 +928,7 @@ class VPNManager:
             "dns": {
                 "servers": [
                     {"tag": "dns_direct", "address": "1.1.1.1", "detour": "direct"},
-                    {"tag": "dns_proxy", "address": "8.8.8.8", "detour": "proxy"},
+                    {"tag": "dns_proxy", "address": "tcp://8.8.8.8", "detour": "proxy"},
                 ],
                 "rules": dns_rules,
             },
@@ -917,9 +954,7 @@ class VPNManager:
         self.log(f"Config written to {self.config_path}")
 
     def _get_clean_env(self):
-        """Очищает переменные окружения от путей PyInstaller/MEI.
-        Предотвращает падение sing-box из-за несовместимости библиотек.
-        """
+        """Очищает переменные окружения от путей PyInstaller/MEI."""
         env = os.environ.copy()
         if "LD_LIBRARY_PATH" in env:
             paths = [p for p in env["LD_LIBRARY_PATH"].split(":") if "/tmp/" not in p and "_MEI" not in p]
@@ -952,7 +987,6 @@ class VPNManager:
 
         self.generate_config(node)
 
-        # Перенаправляем логи sing-box в файл, чтобы не забивать PIPE и иметь историю ошибок
         log_file_path = os.path.join(self.settings_dir, "sing-box.log")
         try:
             log_file = open(log_file_path, "w")
@@ -963,6 +997,7 @@ class VPNManager:
                 env=self._get_clean_env(),
                 start_new_session=True
             )
+            log_file.close() # Закрываем дескриптор в Python после наследования процессом
             self.log(f"sing-box started, PID={self.process.pid}. Logs: {log_file_path}")
 
             settings = self.load_settings()
@@ -976,20 +1011,24 @@ class VPNManager:
     def stop(self):
         """Останавливает все процессы sing-box и ждет их завершения."""
         self.log("Stopping sing-box...")
+        if self.process:
+            try:
+                self.process.terminate()
+            except Exception:
+                pass
+
         try:
-            # Отправляем SIGTERM
+            cmd_pattern = f"^{self.singbox_path}"
             subprocess.run(
-                ["pkill", "-x", "sing-box"],
+                ["pkill", "-f", cmd_pattern],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
         except Exception as e:
             self.log(f"Error calling pkill: {e}")
 
-        # Ожидаем завершения процессов (до 5 секунд)
-        import time
         start_time = time.time()
-        while time.time() - start_time < 5:
+        while time.time() - start_time < 3:
             if not self.is_running():
                 self.log("sing-box stopped cleanly.")
                 break
@@ -997,15 +1036,15 @@ class VPNManager:
         else:
             self.log("sing-box did not stop in time, sending SIGKILL...")
             try:
+                cmd_pattern = f"^{self.singbox_path}"
                 subprocess.run(
-                    ["pkill", "-9", "-x", "sing-box"],
+                    ["pkill", "-9", "-f", cmd_pattern],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                 )
             except Exception:
                 pass
             
-            # Принудительно удаляем tun0 интерфейс из ядра Linux, если он остался
             try:
                 subprocess.run(
                     ["ip", "link", "delete", "tun0"],
@@ -1017,10 +1056,6 @@ class VPNManager:
                 pass
 
         if self.process:
-            try:
-                self.process.terminate()
-            except Exception:
-                pass
             self.process = None
 
         settings = self.load_settings()
