@@ -806,15 +806,27 @@ function Content() {
                 onChange={(e: any) => setInputUrl(e.target.value)}
               />
             </div>
-            <div style={{ width: "40px", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <div style={{ width: "38px", height: "38px", minWidth: "38px", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
               <ButtonItem
                 layout="below"
                 onClick={handlePasteFromClipboard}
                 disabled={loading}
+                {...({
+                  style: {
+                    width: "38px",
+                    height: "38px",
+                    minWidth: "38px",
+                    maxWidth: "38px",
+                    padding: "0",
+                    margin: "0",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    borderRadius: "4px"
+                  }
+                } as any)}
               >
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "100%", height: "100%" }}>
-                  <FaClipboard size={14} />
-                </div>
+                <FaClipboard size={14} />
               </ButtonItem>
             </div>
           </div>
