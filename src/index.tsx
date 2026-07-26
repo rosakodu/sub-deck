@@ -692,28 +692,28 @@ function Content() {
   const handlePasteFromClipboard = async () => {
     let pastedText = "";
 
-    // 1. Пробуем нативный Steam Client JS API (доступен во всех окнах SteamOS Game Mode)
+    // 1. Системно читаем буфер обмена Steam Deck (X11 / Gamescope в Игровом режиме и Klipper в Desktop Mode)
     try {
-      if ((window as any).SteamClient?.System?.GetClipboardText) {
-        const text = await (window as any).SteamClient.System.GetClipboardText();
-        if (text && typeof text === "string" && text.trim()) {
-          pastedText = text.trim();
-        }
+      const rawBackendText = await getClipboard();
+      const backendText = (rawBackendText as any)?.result ?? rawBackendText;
+      if (backendText && typeof backendText === "string" && backendText.trim()) {
+        pastedText = backendText.trim();
       }
-    } catch (steamErr) {
-      console.warn("SteamClient.System.GetClipboardText error:", steamErr);
+    } catch (backendErr) {
+      console.warn("Backend system clipboard read error:", backendErr);
     }
 
-    // 2. Системно читаем буфер обмена SteamOS через Python backend (qdbus org.kde.klipper)
+    // 2. Пробуем нативный Steam Client JS API
     if (!pastedText) {
       try {
-        const rawBackendText = await getClipboard();
-        const backendText = (rawBackendText as any)?.result ?? rawBackendText;
-        if (backendText && typeof backendText === "string" && backendText.trim()) {
-          pastedText = backendText.trim();
+        if ((window as any).SteamClient?.System?.GetClipboardText) {
+          const text = await (window as any).SteamClient.System.GetClipboardText();
+          if (text && typeof text === "string" && text.trim()) {
+            pastedText = text.trim();
+          }
         }
-      } catch (backendErr) {
-        console.warn("Backend system clipboard read error:", backendErr);
+      } catch (steamErr) {
+        console.warn("SteamClient.System.GetClipboardText error:", steamErr);
       }
     }
 

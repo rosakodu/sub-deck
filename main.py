@@ -215,53 +215,84 @@ class Plugin:
         return settings.get("selected_node")
 
     async def get_clipboard(self) -> str:
-        """Считывает содержимое системного буфера обмена SteamOS через Klipper DBus / qdbus / dbus-send."""
+        """Считывает содержимое системного буфера обмена Steam Deck (включая Игровой Режим / Gamescope)."""
         def _read_sys_clipboard():
-            import subprocess
+            import ctypes
             import os
+            import subprocess
 
+            # 1. Чтение X11 / Gamescope буфера обмена через ctypes (Работает 100% в Игровом режиме Steam Deck)
+            for disp_name in [b":0", b":1", b":2"]:
+                try:
+                    x11 = ctypes.cdll.LoadLibrary("libX11.so.6")
+                    x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
+                    x11.XOpenDisplay.restype = ctypes.c_void_p
+                    x11.XCloseDisplay.argtypes = [ctypes.c_void_p]
+                    x11.XInternAtom.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
+                    x11.XInternAtom.restype = ctypes.c_ulong
+                    x11.XCreateSimpleWindow.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.c_int, ctypes.c_uint, ctypes.c_uint, ctypes.c_uint, ctypes.c_ulong, ctypes.c_ulong]
+                    x11.XCreateSimpleWindow.restype = ctypes.c_ulong
+                    x11.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
+                    x11.XDefaultRootWindow.restype = ctypes.c_ulong
+                    x11.XConvertSelection.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong]
+                    x11.XConvertSelection.restype = ctypes.c_int
+                    x11.XNextEvent.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+                    x11.XNextEvent.restype = ctypes.c_int
+                    x11.XGetWindowProperty.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_long, ctypes.c_long, ctypes.c_int, ctypes.c_ulong, ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_char_p)]
+                    x11.XGetWindowProperty.restype = ctypes.c_int
+                    x11.XFree.argtypes = [ctypes.c_void_p]
+                    x11.XDestroyWindow.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+
+                    display = x11.XOpenDisplay(disp_name)
+                    if display:
+                        try:
+                            root = x11.XDefaultRootWindow(display)
+                            win = x11.XCreateSimpleWindow(display, root, 0, 0, 1, 1, 0, 0, 0)
+                            clipboard_atom = x11.XInternAtom(display, b"CLIPBOARD", False)
+                            utf8_atom = x11.XInternAtom(display, b"UTF8_STRING", False)
+                            prop_atom = x11.XInternAtom(display, b"SUBDECK_CLIP", False)
+
+                            x11.XConvertSelection(display, clipboard_atom, utf8_atom, prop_atom, win, 0)
+                            event_buf = (ctypes.c_char * 192)()
+                            x11.XNextEvent(display, event_buf)
+
+                            actual_type = ctypes.c_ulong()
+                            actual_format = ctypes.c_int()
+                            nitems = ctypes.c_ulong()
+                            bytes_after = ctypes.c_ulong()
+                            prop_val = ctypes.c_char_p()
+
+                            x11.XGetWindowProperty(
+                                display, win, prop_atom, 0, 1024 * 1024, False, 0,
+                                ctypes.byref(actual_type), ctypes.byref(actual_format),
+                                ctypes.byref(nitems), ctypes.byref(bytes_after),
+                                ctypes.byref(prop_val)
+                            )
+
+                            res_text = ""
+                            if prop_val.value:
+                                res_text = prop_val.value.decode("utf-8", errors="ignore")
+                                x11.XFree(prop_val)
+
+                            x11.XDestroyWindow(display, win)
+                            if res_text.strip():
+                                return res_text.strip()
+                        finally:
+                            x11.XCloseDisplay(display)
+                except Exception:
+                    pass
+
+            # 2. Опросить KDE Klipper DBus (для Рабочего стола / Desktop Mode)
             env = dict(os.environ)
             if "DBUS_SESSION_BUS_ADDRESS" not in env:
                 env["DBUS_SESSION_BUS_ADDRESS"] = "unix:path=/run/user/1000/bus"
 
-            # 1. KDE Klipper DBus через qdbus
             for qdbus_bin in ["qdbus", "qdbus-qt5"]:
                 try:
                     res = subprocess.run(
                         [qdbus_bin, "org.kde.klipper", "/klipper", "getClipboardContents"],
                         env=env, capture_output=True, text=True, timeout=2
                     )
-                    if res.returncode == 0 and res.stdout.strip():
-                        return res.stdout.strip()
-                except Exception:
-                    pass
-
-            # 2. dbus-send на org.kde.klipper
-            try:
-                res = subprocess.run(
-                    [
-                        "dbus-send", "--session", "--dest=org.kde.klipper",
-                        "--type=method_call", "--print-reply",
-                        "/klipper", "org.kde.klipper.klipper.getClipboardContents"
-                    ],
-                    env=env, capture_output=True, text=True, timeout=2
-                )
-                if res.returncode == 0 and "string" in res.stdout:
-                    lines = res.stdout.splitlines()
-                    for line in lines:
-                        if "string" in line:
-                            parts = line.split("string", 1)
-                            if len(parts) > 1:
-                                val = parts[1].strip().strip('"')
-                                if val:
-                                    return val
-            except Exception:
-                pass
-
-            # 3. wl-paste / xclip / xsel
-            for cmd in [["wl-paste", "--no-newline"], ["wl-paste"], ["xclip", "-selection", "clipboard", "-o"], ["xsel", "--clipboard", "--output"]]:
-                try:
-                    res = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=1)
                     if res.returncode == 0 and res.stdout.strip():
                         return res.stdout.strip()
                 except Exception:
