@@ -4,7 +4,6 @@ import {
   PanelSectionRow,
   TextField,
   Navigation,
-  Focusable,
   staticClasses
 } from "@decky/ui";
 import {
@@ -826,7 +825,10 @@ function Content() {
       </PanelSection>
 
       <style>{`
-        .paste-btn-clean {
+        .paste-btn-clean,
+        .paste-btn-clean *,
+        .paste-btn-clean > div,
+        .paste-btn-clean button {
           width: 38px !important;
           height: 38px !important;
           min-width: 38px !important;
@@ -845,28 +847,21 @@ function Content() {
           cursor: pointer !important;
           transition: background-color 0.15s ease, color 0.15s ease !important;
         }
-        .paste-btn-clean svg {
-          fill: #ffffff !important;
-          color: #ffffff !important;
-          transition: fill 0.15s ease, color 0.15s ease !important;
-        }
         .paste-btn-clean:focus,
+        .paste-btn-clean:focus *,
         .paste-btn-clean:hover,
+        .paste-btn-clean:hover *,
         .paste-btn-clean:active,
-        .paste-btn-clean:focus-within {
+        .paste-btn-clean:active *,
+        .paste-btn-clean:focus-within,
+        .paste-btn-clean:focus-within * {
           background: #ffffff !important;
           color: #1a1f24 !important;
+          fill: #1a1f24 !important;
           border: none !important;
           outline: none !important;
           box-shadow: none !important;
           border-radius: 0px !important;
-        }
-        .paste-btn-clean:focus svg,
-        .paste-btn-clean:hover svg,
-        .paste-btn-clean:active svg,
-        .paste-btn-clean:focus-within svg {
-          fill: #1a1f24 !important;
-          color: #1a1f24 !important;
         }
       `}</style>
       <PanelSectionRow>
@@ -881,13 +876,16 @@ function Content() {
                 onChange={(e: any) => setInputUrl(e.target.value)}
               />
             </div>
-            <Focusable
-              className="paste-btn-clean"
-              onClick={handlePasteFromClipboard}
-              onActivate={handlePasteFromClipboard}
-            >
-              <FaClipboard size={14} />
-            </Focusable>
+            <div style={{ width: "38px", height: "38px", flexShrink: 0 }}>
+              <ButtonItem
+                layout="below"
+                onClick={handlePasteFromClipboard}
+                disabled={loading}
+                {...({ className: "paste-btn-clean" } as any)}
+              >
+                <FaClipboard size={14} />
+              </ButtonItem>
+            </div>
           </div>
         </div>
       </PanelSectionRow>
