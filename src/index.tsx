@@ -4,6 +4,7 @@ import {
   PanelSectionRow,
   TextField,
   Navigation,
+  Focusable,
   staticClasses
 } from "@decky/ui";
 import {
@@ -794,12 +795,28 @@ function Content() {
       </PanelSection>
 
       <style>{`
-        .paste-btn-clean,
+        .paste-btn-clean {
+          width: 38px !important;
+          height: 38px !important;
+          min-width: 38px !important;
+          max-width: 38px !important;
+          padding: 0 !important;
+          margin: 0 !important;
+          display: flex !important;
+          align-items: center !important;
+          justify-content: center !important;
+          border-radius: 0px !important;
+          border: none !important;
+          outline: none !important;
+          box-shadow: none !important;
+          background: rgba(255, 255, 255, 0.1) !important;
+          cursor: pointer !important;
+        }
         .paste-btn-clean:focus,
         .paste-btn-clean:hover,
         .paste-btn-clean:active,
-        .paste-btn-clean:focus-within,
-        .paste-btn-clean * {
+        .paste-btn-clean:focus-within {
+          background: rgba(255, 255, 255, 0.25) !important;
           border: none !important;
           outline: none !important;
           box-shadow: none !important;
@@ -818,33 +835,13 @@ function Content() {
                 onChange={(e: any) => setInputUrl(e.target.value)}
               />
             </div>
-            <div style={{ width: "38px", height: "38px", minWidth: "38px", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <ButtonItem
-                className="paste-btn-clean"
-                layout="below"
-                onClick={handlePasteFromClipboard}
-                disabled={loading}
-                {...({
-                  style: {
-                    width: "38px",
-                    height: "38px",
-                    minWidth: "38px",
-                    maxWidth: "38px",
-                    padding: "0",
-                    margin: "0",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    borderRadius: "0px",
-                    border: "none",
-                    outline: "none",
-                    boxShadow: "none"
-                  }
-                } as any)}
-              >
-                <FaClipboard size={14} />
-              </ButtonItem>
-            </div>
+            <Focusable
+              className="paste-btn-clean"
+              onClick={handlePasteFromClipboard}
+              onActivate={handlePasteFromClipboard}
+            >
+              <FaClipboard size={14} />
+            </Focusable>
           </div>
         </div>
       </PanelSectionRow>
