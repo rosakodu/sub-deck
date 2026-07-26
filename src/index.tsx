@@ -808,7 +808,7 @@ function Content() {
               width: "38px",
               height: "38px",
               minWidth: "38px",
-              marginBottom: "2px",
+              marginBottom: "6px",
               flexShrink: 0,
               display: "flex",
               alignItems: "center",
