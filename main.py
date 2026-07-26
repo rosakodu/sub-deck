@@ -288,21 +288,45 @@ print(get_x11_clipboard_text())
             except Exception:
                 pass
 
-            # 2. Опросить KDE Klipper DBus (для Рабочего стола / Desktop Mode)
-            env = dict(os.environ)
-            if "DBUS_SESSION_BUS_ADDRESS" not in env:
-                env["DBUS_SESSION_BUS_ADDRESS"] = "unix:path=/run/user/1000/bus"
-
+            # 2. Опросить KDE Klipper DBus (для Рабочего стола / Desktop Mode) от имени deck
             for qdbus_bin in ["qdbus", "qdbus-qt5"]:
                 try:
                     res = subprocess.run(
-                        [qdbus_bin, "org.kde.klipper", "/klipper", "getClipboardContents"],
-                        env=env, capture_output=True, text=True, timeout=2
+                        [
+                            "sudo", "-u", "deck",
+                            "env", "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus",
+                            qdbus_bin, "org.kde.klipper", "/klipper", "getClipboardContents"
+                        ],
+                        capture_output=True, text=True, timeout=2
                     )
                     if res.returncode == 0 and res.stdout.strip():
                         return res.stdout.strip()
                 except Exception:
                     pass
+
+            # 3. dbus-send на org.kde.klipper от имени deck (Резервный метод для Desktop Mode)
+            try:
+                res = subprocess.run(
+                    [
+                        "sudo", "-u", "deck",
+                        "env", "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus",
+                        "dbus-send", "--session", "--dest=org.kde.klipper",
+                        "--type=method_call", "--print-reply",
+                        "/klipper", "org.kde.klipper.klipper.getClipboardContents"
+                    ],
+                    capture_output=True, text=True, timeout=2
+                )
+                if res.returncode == 0 and "string" in res.stdout:
+                    lines = res.stdout.splitlines()
+                    for line in lines:
+                        if "string" in line:
+                            parts = line.split("string", 1)
+                            if len(parts) > 1:
+                                val = parts[1].strip().strip('"')
+                                if val:
+                                    return val
+            except Exception:
+                pass
 
             return ""
 
