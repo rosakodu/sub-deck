@@ -793,39 +793,30 @@ function Content() {
         )}
       </PanelSection>
 
-      {/* Поле добавления новой подписки с аккуратной квадратной кнопкой вставки */}
+      {/* Поле добавления новой подписки с кнопкой вставки из буфера обмена */}
       <PanelSectionRow>
-        <div style={{ display: "flex", alignItems: "flex-end", gap: "6px", width: "100%" }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <TextField
-              label={t("subUrlLabel")}
-              value={inputUrl}
-              onChange={(e: any) => setInputUrl(e.target.value)}
-            />
+        <div style={{ display: "flex", flexDirection: "column", width: "100%" }}>
+          <div style={{ fontSize: "11px", fontWeight: "bold", color: "#a5a5a5", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "6px" }}>
+            {t("subUrlLabel")}
           </div>
-          <div
-            style={{
-              width: "38px",
-              height: "38px",
-              minWidth: "38px",
-              marginBottom: "14px",
-              flexShrink: 0,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              overflow: "hidden",
-              borderRadius: "4px"
-            }}
-          >
-            <ButtonItem
-              layout="below"
-              onClick={handlePasteFromClipboard}
-              disabled={loading}
-            >
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "100%", height: "100%" }}>
-                <FaClipboard size={16} />
-              </div>
-            </ButtonItem>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", width: "100%" }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <TextField
+                value={inputUrl}
+                onChange={(e: any) => setInputUrl(e.target.value)}
+              />
+            </div>
+            <div style={{ width: "40px", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <ButtonItem
+                layout="below"
+                onClick={handlePasteFromClipboard}
+                disabled={loading}
+              >
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "100%", height: "100%" }}>
+                  <FaClipboard size={14} />
+                </div>
+              </ButtonItem>
+            </div>
           </div>
         </div>
       </PanelSectionRow>
