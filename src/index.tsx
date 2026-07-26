@@ -12,7 +12,7 @@ import {
   toaster
 } from "@decky/api";
 import { useState, useEffect, useMemo } from "react";
-import { FaNetworkWired } from "react-icons/fa";
+import { FaNetworkWired, FaClipboard } from "react-icons/fa";
 
 interface NodeConfig {
   name: string;
@@ -78,7 +78,10 @@ type TranslationKeys =
   | "freeConfigsUpdated"
   | "supportBtn"
   | "logCreatedTitle"
-  | "logCreated";
+  | "logCreated"
+  | "pasteBtn"
+  | "pastedFromClipboard"
+  | "clipboardEmptyOrBlocked";
 
 const translations: Record<string, Record<TranslationKeys, string>> = {
   english: {
@@ -114,7 +117,10 @@ const translations: Record<string, Record<TranslationKeys, string>> = {
     freeConfigsUpdated: "Free subscriptions updated",
     supportBtn: "Support",
     logCreatedTitle: "Log Created",
-    logCreated: "Log saved to sub-deck.log"
+    logCreated: "Log saved to sub-deck.log",
+    pasteBtn: "Paste",
+    pastedFromClipboard: "Pasted from clipboard",
+    clipboardEmptyOrBlocked: "Clipboard is empty or access blocked"
   },
   russian: {
     title: "Управление VLESS",
@@ -149,7 +155,10 @@ const translations: Record<string, Record<TranslationKeys, string>> = {
     freeConfigsUpdated: "Бесплатные подписки обновлены",
     supportBtn: "Поддержка",
     logCreatedTitle: "Лог создан",
-    logCreated: "Лог сохранен в sub-deck.log"
+    logCreated: "Лог сохранен в sub-deck.log",
+    pasteBtn: "Вставить",
+    pastedFromClipboard: "Вставлено из буфера обмена",
+    clipboardEmptyOrBlocked: "Буфер обмена пуст или доступ ограничен"
   },
   schinese: {
     title: "VLESS 管理",
@@ -184,7 +193,10 @@ const translations: Record<string, Record<TranslationKeys, string>> = {
     freeConfigsUpdated: "免费订阅已更新",
     supportBtn: "支持",
     logCreatedTitle: "日志已创建",
-    logCreated: "日志已保存至 sub-deck.log"
+    logCreated: "日志已保存至 sub-deck.log",
+    pasteBtn: "粘贴",
+    pastedFromClipboard: "已从剪贴板粘贴",
+    clipboardEmptyOrBlocked: "剪贴板为空或拒绝访问"
   },
   tchinese: {
     title: "VLESS 管理",
@@ -219,7 +231,10 @@ const translations: Record<string, Record<TranslationKeys, string>> = {
     freeConfigsUpdated: "免費訂閱已更新",
     supportBtn: "支援",
     logCreatedTitle: "日誌已建立",
-    logCreated: "日誌已儲存至 sub-deck.log"
+    logCreated: "日誌已儲存至 sub-deck.log",
+    pasteBtn: "貼上",
+    pastedFromClipboard: "已從剪貼簿貼上",
+    clipboardEmptyOrBlocked: "剪貼簿為空或拒絕存取"
   },
   arabic: {
     title: "إدارة VLESS",
@@ -254,7 +269,10 @@ const translations: Record<string, Record<TranslationKeys, string>> = {
     freeConfigsUpdated: "تم تحديث الاشتراكات المجانية",
     supportBtn: "الدعم",
     logCreatedTitle: "تم إنشاء السجل",
-    logCreated: "تم حفظ السجل في sub-deck.log"
+    logCreated: "تم حفظ السجل في sub-deck.log",
+    pasteBtn: "لصق",
+    pastedFromClipboard: "تم اللصق من الحافظة",
+    clipboardEmptyOrBlocked: "الحافظة فارغة أو تم رفض الوصول"
   },
   persian: {
     title: "مدیریت VLESS",
@@ -289,7 +307,10 @@ const translations: Record<string, Record<TranslationKeys, string>> = {
     freeConfigsUpdated: "اشتراک‌های رایگان به‌روزرسانی شدند",
     supportBtn: "پشتیبانی",
     logCreatedTitle: "لاگ ایجاد شد",
-    logCreated: "لاگ در sub-deck.log ذخیره شد"
+    logCreated: "لاگ در sub-deck.log ذخیره شد",
+    pasteBtn: "جای‌گذاری",
+    pastedFromClipboard: "از کلیپ‌بورد جای‌گذاری شد",
+    clipboardEmptyOrBlocked: "کلیپ‌بورد خالی است یا دسترسی مسدود شده"
   },
   turkish: {
     title: "VPN Yapılandırmaları",
@@ -324,7 +345,10 @@ const translations: Record<string, Record<TranslationKeys, string>> = {
     freeConfigsUpdated: "Ücretsiz abonelikler güncellendi",
     supportBtn: "Destek",
     logCreatedTitle: "Günlük Oluşturuldu",
-    logCreated: "Günlük sub-deck.log dosyasına kaydedildi"
+    logCreated: "Günlük sub-deck.log dosyasına kaydedildi",
+    pasteBtn: "Yapıştır",
+    pastedFromClipboard: "Panodan yapıştırıldı",
+    clipboardEmptyOrBlocked: "Pano boş veya erişim engellendi"
   }
 };
 
@@ -664,6 +688,32 @@ function Content() {
     }
   };
 
+  const handlePasteFromClipboard = async () => {
+    try {
+      if (navigator.clipboard && typeof navigator.clipboard.readText === "function") {
+        const text = await navigator.clipboard.readText();
+        if (text && text.trim()) {
+          setInputUrl(text.trim());
+          toaster.toast({
+            title: t("success"),
+            body: t("pastedFromClipboard")
+          });
+          return;
+        }
+      }
+      toaster.toast({
+        title: t("toastWarning"),
+        body: t("clipboardEmptyOrBlocked")
+      });
+    } catch (err) {
+      console.warn("Paste clipboard error:", err);
+      toaster.toast({
+        title: t("toastWarning"),
+        body: t("clipboardEmptyOrBlocked")
+      });
+    }
+  };
+
   return (
     <PanelSection title={t("title")}>
       {/* Выбор пресета маршрутизации */}
@@ -743,13 +793,29 @@ function Content() {
         )}
       </PanelSection>
 
-      {/* Поле добавления новой подписки */}
+      {/* Поле добавления новой подписки с кнопкой вставки из буфера обмена */}
       <PanelSectionRow>
-        <TextField
-          label={t("subUrlLabel")}
-          value={inputUrl}
-          onChange={(e: any) => setInputUrl(e.target.value)}
-        />
+        <div style={{ display: "flex", alignItems: "flex-end", gap: "8px", width: "100%" }}>
+          <div style={{ flex: 1 }}>
+            <TextField
+              label={t("subUrlLabel")}
+              value={inputUrl}
+              onChange={(e: any) => setInputUrl(e.target.value)}
+            />
+          </div>
+          <div style={{ minWidth: "100px" }}>
+            <ButtonItem
+              layout="below"
+              onClick={handlePasteFromClipboard}
+              disabled={loading}
+            >
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}>
+                <FaClipboard />
+                <span>{t("pasteBtn")}</span>
+              </div>
+            </ButtonItem>
+          </div>
+        </div>
       </PanelSectionRow>
       
       <PanelSectionRow>
