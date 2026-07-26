@@ -215,22 +215,58 @@ class Plugin:
         return settings.get("selected_node")
 
     async def get_clipboard(self) -> str:
-        """Считывает содержимое буфера обмена ОС через wl-paste / xclip / xsel."""
+        """Считывает содержимое системного буфера обмена SteamOS через Klipper DBus / qdbus / dbus-send."""
         def _read_sys_clipboard():
             import subprocess
-            commands = [
-                ["wl-paste", "--no-newline"],
-                ["wl-paste"],
-                ["xclip", "-selection", "clipboard", "-o"],
-                ["xsel", "--clipboard", "--output"]
-            ]
-            for cmd in commands:
+            import os
+
+            env = dict(os.environ)
+            if "DBUS_SESSION_BUS_ADDRESS" not in env:
+                env["DBUS_SESSION_BUS_ADDRESS"] = "unix:path=/run/user/1000/bus"
+
+            # 1. KDE Klipper DBus через qdbus
+            for qdbus_bin in ["qdbus", "qdbus-qt5"]:
                 try:
-                    res = subprocess.run(cmd, capture_output=True, text=True, timeout=1)
+                    res = subprocess.run(
+                        [qdbus_bin, "org.kde.klipper", "/klipper", "getClipboardContents"],
+                        env=env, capture_output=True, text=True, timeout=2
+                    )
                     if res.returncode == 0 and res.stdout.strip():
                         return res.stdout.strip()
                 except Exception:
                     pass
+
+            # 2. dbus-send на org.kde.klipper
+            try:
+                res = subprocess.run(
+                    [
+                        "dbus-send", "--session", "--dest=org.kde.klipper",
+                        "--type=method_call", "--print-reply",
+                        "/klipper", "org.kde.klipper.klipper.getClipboardContents"
+                    ],
+                    env=env, capture_output=True, text=True, timeout=2
+                )
+                if res.returncode == 0 and "string" in res.stdout:
+                    lines = res.stdout.splitlines()
+                    for line in lines:
+                        if "string" in line:
+                            parts = line.split("string", 1)
+                            if len(parts) > 1:
+                                val = parts[1].strip().strip('"')
+                                if val:
+                                    return val
+            except Exception:
+                pass
+
+            # 3. wl-paste / xclip / xsel
+            for cmd in [["wl-paste", "--no-newline"], ["wl-paste"], ["xclip", "-selection", "clipboard", "-o"], ["xsel", "--clipboard", "--output"]]:
+                try:
+                    res = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=1)
+                    if res.returncode == 0 and res.stdout.strip():
+                        return res.stdout.strip()
+                except Exception:
+                    pass
+
             return ""
 
         return await self.loop.run_in_executor(None, _read_sys_clipboard)

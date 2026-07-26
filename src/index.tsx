@@ -693,19 +693,19 @@ function Content() {
   const handlePasteFromClipboard = async () => {
     let pastedText = "";
 
-    // 1. Пробуем встроенный API буфера обмена браузера
+    // 1. Пробуем нативный Steam Client JS API (доступен во всех окнах SteamOS Game Mode)
     try {
-      if (navigator.clipboard && typeof navigator.clipboard.readText === "function") {
-        const text = await navigator.clipboard.readText();
-        if (text && text.trim()) {
+      if ((window as any).SteamClient?.System?.GetClipboardText) {
+        const text = await (window as any).SteamClient.System.GetClipboardText();
+        if (text && typeof text === "string" && text.trim()) {
           pastedText = text.trim();
         }
       }
-    } catch (clipErr) {
-      console.warn("Browser clipboard read restricted, trying system backend:", clipErr);
+    } catch (steamErr) {
+      console.warn("SteamClient.System.GetClipboardText error:", steamErr);
     }
 
-    // 2. Если браузер заблокировал доступ, системно читаем буфер обмена SteamOS через Python (wl-paste/xclip/xsel)
+    // 2. Системно читаем буфер обмена SteamOS через Python backend (qdbus org.kde.klipper)
     if (!pastedText) {
       try {
         const rawBackendText = await getClipboard();
@@ -715,6 +715,20 @@ function Content() {
         }
       } catch (backendErr) {
         console.warn("Backend system clipboard read error:", backendErr);
+      }
+    }
+
+    // 3. Пробуем стандартный браузерный API
+    if (!pastedText) {
+      try {
+        if (navigator.clipboard && typeof navigator.clipboard.readText === "function") {
+          const text = await navigator.clipboard.readText();
+          if (text && text.trim()) {
+            pastedText = text.trim();
+          }
+        }
+      } catch (clipErr) {
+        console.warn("Browser clipboard read error:", clipErr);
       }
     }
 
