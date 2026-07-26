@@ -822,7 +822,10 @@ function Content() {
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    borderRadius: "4px"
+                    borderRadius: "0px",
+                    border: "none",
+                    outline: "none",
+                    boxShadow: "none"
                   }
                 } as any)}
               >
