@@ -221,66 +221,72 @@ class Plugin:
             import os
             import subprocess
 
-            # 1. Чтение X11 / Gamescope буфера обмена через ctypes (Работает 100% в Игровом режиме Steam Deck)
-            for disp_name in [b":0", b":1", b":2"]:
-                try:
-                    x11 = ctypes.cdll.LoadLibrary("libX11.so.6")
-                    x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
-                    x11.XOpenDisplay.restype = ctypes.c_void_p
-                    x11.XCloseDisplay.argtypes = [ctypes.c_void_p]
-                    x11.XInternAtom.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
-                    x11.XInternAtom.restype = ctypes.c_ulong
-                    x11.XCreateSimpleWindow.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.c_int, ctypes.c_uint, ctypes.c_uint, ctypes.c_uint, ctypes.c_ulong, ctypes.c_ulong]
-                    x11.XCreateSimpleWindow.restype = ctypes.c_ulong
-                    x11.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
-                    x11.XDefaultRootWindow.restype = ctypes.c_ulong
-                    x11.XConvertSelection.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong]
-                    x11.XConvertSelection.restype = ctypes.c_int
-                    x11.XNextEvent.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
-                    x11.XNextEvent.restype = ctypes.c_int
-                    x11.XGetWindowProperty.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_long, ctypes.c_long, ctypes.c_int, ctypes.c_ulong, ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_char_p)]
-                    x11.XGetWindowProperty.restype = ctypes.c_int
-                    x11.XFree.argtypes = [ctypes.c_void_p]
-                    x11.XDestroyWindow.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+            # 1. Чтение X11 / Gamescope буфера обмена от имени пользователя deck (Игровой режим Steam Deck)
+            helper_script = """
+import ctypes
+x11 = ctypes.cdll.LoadLibrary("libX11.so.6")
+x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
+x11.XOpenDisplay.restype = ctypes.c_void_p
+x11.XCloseDisplay.argtypes = [ctypes.c_void_p]
+x11.XInternAtom.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
+x11.XInternAtom.restype = ctypes.c_ulong
+x11.XCreateSimpleWindow.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.c_int, ctypes.c_uint, ctypes.c_uint, ctypes.c_uint, ctypes.c_ulong, ctypes.c_ulong]
+x11.XCreateSimpleWindow.restype = ctypes.c_ulong
+x11.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
+x11.XDefaultRootWindow.restype = ctypes.c_ulong
+x11.XConvertSelection.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong]
+x11.XConvertSelection.restype = ctypes.c_int
+x11.XNextEvent.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+x11.XNextEvent.restype = ctypes.c_int
+x11.XGetWindowProperty.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_long, ctypes.c_long, ctypes.c_int, ctypes.c_ulong, ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_char_p)]
+x11.XGetWindowProperty.restype = ctypes.c_int
+x11.XFree.argtypes = [ctypes.c_void_p]
+x11.XDestroyWindow.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
 
-                    display = x11.XOpenDisplay(disp_name)
-                    if display:
-                        try:
-                            root = x11.XDefaultRootWindow(display)
-                            win = x11.XCreateSimpleWindow(display, root, 0, 0, 1, 1, 0, 0, 0)
-                            clipboard_atom = x11.XInternAtom(display, b"CLIPBOARD", False)
-                            utf8_atom = x11.XInternAtom(display, b"UTF8_STRING", False)
-                            prop_atom = x11.XInternAtom(display, b"SUBDECK_CLIP", False)
+def get_x11_clipboard_text():
+    display = x11.XOpenDisplay(b":0")
+    if not display:
+        return ""
+    try:
+        root = x11.XDefaultRootWindow(display)
+        win = x11.XCreateSimpleWindow(display, root, 0, 0, 1, 1, 0, 0, 0)
+        clipboard_atom = x11.XInternAtom(display, b"CLIPBOARD", False)
+        utf8_atom = x11.XInternAtom(display, b"UTF8_STRING", False)
+        prop_atom = x11.XInternAtom(display, b"SUBDECK_CLIP", False)
+        x11.XConvertSelection(display, clipboard_atom, utf8_atom, prop_atom, win, 0)
+        event_buf = (ctypes.c_char * 192)()
+        x11.XNextEvent(display, event_buf)
+        actual_type = ctypes.c_ulong()
+        actual_format = ctypes.c_int()
+        nitems = ctypes.c_ulong()
+        bytes_after = ctypes.c_ulong()
+        prop_val = ctypes.c_char_p()
+        x11.XGetWindowProperty(
+            display, win, prop_atom, 0, 1024*1024, False, 0,
+            ctypes.byref(actual_type), ctypes.byref(actual_format),
+            ctypes.byref(nitems), ctypes.byref(bytes_after),
+            ctypes.byref(prop_val)
+        )
+        res_text = ""
+        if prop_val.value:
+            res_text = prop_val.value.decode("utf-8", errors="ignore")
+            x11.XFree(prop_val)
+        x11.XDestroyWindow(display, win)
+        return res_text
+    finally:
+        x11.XCloseDisplay(display)
 
-                            x11.XConvertSelection(display, clipboard_atom, utf8_atom, prop_atom, win, 0)
-                            event_buf = (ctypes.c_char * 192)()
-                            x11.XNextEvent(display, event_buf)
-
-                            actual_type = ctypes.c_ulong()
-                            actual_format = ctypes.c_int()
-                            nitems = ctypes.c_ulong()
-                            bytes_after = ctypes.c_ulong()
-                            prop_val = ctypes.c_char_p()
-
-                            x11.XGetWindowProperty(
-                                display, win, prop_atom, 0, 1024 * 1024, False, 0,
-                                ctypes.byref(actual_type), ctypes.byref(actual_format),
-                                ctypes.byref(nitems), ctypes.byref(bytes_after),
-                                ctypes.byref(prop_val)
-                            )
-
-                            res_text = ""
-                            if prop_val.value:
-                                res_text = prop_val.value.decode("utf-8", errors="ignore")
-                                x11.XFree(prop_val)
-
-                            x11.XDestroyWindow(display, win)
-                            if res_text.strip():
-                                return res_text.strip()
-                        finally:
-                            x11.XCloseDisplay(display)
-                except Exception:
-                    pass
+print(get_x11_clipboard_text())
+"""
+            try:
+                res = subprocess.run(
+                    ["sudo", "-u", "deck", "python3", "-c", helper_script],
+                    capture_output=True, text=True, timeout=3
+                )
+                if res.returncode == 0 and res.stdout.strip():
+                    return res.stdout.strip()
+            except Exception:
+                pass
 
             # 2. Опросить KDE Klipper DBus (для Рабочего стола / Desktop Mode)
             env = dict(os.environ)
