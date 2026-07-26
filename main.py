@@ -300,7 +300,8 @@ class Plugin:
 
             return ""
 
-        return await self.loop.run_in_executor(None, _read_sys_clipboard)
+        loop = getattr(self, "loop", None) or asyncio.get_event_loop()
+        return await loop.run_in_executor(None, _read_sys_clipboard)
 
     async def check_and_update_subscriptions(self):
         settings = self.vpn.load_settings()
