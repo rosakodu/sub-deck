@@ -803,15 +803,14 @@ function Content() {
               onChange={(e: any) => setInputUrl(e.target.value)}
             />
           </div>
-          <div style={{ minWidth: "100px" }}>
+          <div style={{ width: "40px", flexShrink: 0 }}>
             <ButtonItem
               layout="below"
               onClick={handlePasteFromClipboard}
               disabled={loading}
             >
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}>
-                <FaClipboard />
-                <span>{t("pasteBtn")}</span>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <FaClipboard size={14} />
               </div>
             </ButtonItem>
           </div>
