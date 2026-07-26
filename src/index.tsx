@@ -45,6 +45,7 @@ const disconnect = callable<[], boolean>("disconnect");
 const isConnected = callable<[], boolean>("is_connected");
 const getSteamLanguage = callable<[], string>("get_steam_language");
 const exportLogs = callable<[], string>("export_logs");
+const getClipboard = callable<[], string>("get_clipboard");
 
 type TranslationKeys =
   | "title"
@@ -690,24 +691,40 @@ function Content() {
   };
 
   const handlePasteFromClipboard = async () => {
+    let pastedText = "";
+
+    // 1. Пробуем встроенный API буфера обмена браузера
     try {
       if (navigator.clipboard && typeof navigator.clipboard.readText === "function") {
         const text = await navigator.clipboard.readText();
         if (text && text.trim()) {
-          setInputUrl(text.trim());
-          toaster.toast({
-            title: t("success"),
-            body: t("pastedFromClipboard")
-          });
-          return;
+          pastedText = text.trim();
         }
       }
+    } catch (clipErr) {
+      console.warn("Browser clipboard read restricted, trying system backend:", clipErr);
+    }
+
+    // 2. Если браузер заблокировал доступ, системно читаем буфер обмена SteamOS через Python (wl-paste/xclip/xsel)
+    if (!pastedText) {
+      try {
+        const rawBackendText = await getClipboard();
+        const backendText = (rawBackendText as any)?.result ?? rawBackendText;
+        if (backendText && typeof backendText === "string" && backendText.trim()) {
+          pastedText = backendText.trim();
+        }
+      } catch (backendErr) {
+        console.warn("Backend system clipboard read error:", backendErr);
+      }
+    }
+
+    if (pastedText) {
+      setInputUrl(pastedText);
       toaster.toast({
-        title: t("toastWarning"),
-        body: t("clipboardEmptyOrBlocked")
+        title: t("success"),
+        body: t("pastedFromClipboard")
       });
-    } catch (err) {
-      console.warn("Paste clipboard error:", err);
+    } else {
       toaster.toast({
         title: t("toastWarning"),
         body: t("clipboardEmptyOrBlocked")

@@ -214,6 +214,27 @@ class Plugin:
         settings = self.vpn.load_settings()
         return settings.get("selected_node")
 
+    async def get_clipboard(self) -> str:
+        """Считывает содержимое буфера обмена ОС через wl-paste / xclip / xsel."""
+        def _read_sys_clipboard():
+            import subprocess
+            commands = [
+                ["wl-paste", "--no-newline"],
+                ["wl-paste"],
+                ["xclip", "-selection", "clipboard", "-o"],
+                ["xsel", "--clipboard", "--output"]
+            ]
+            for cmd in commands:
+                try:
+                    res = subprocess.run(cmd, capture_output=True, text=True, timeout=1)
+                    if res.returncode == 0 and res.stdout.strip():
+                        return res.stdout.strip()
+                except Exception:
+                    pass
+            return ""
+
+        return await self.loop.run_in_executor(None, _read_sys_clipboard)
+
     async def check_and_update_subscriptions(self):
         settings = self.vpn.load_settings()
         urls = settings.get("subscriptions", [])
