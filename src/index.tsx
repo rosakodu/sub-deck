@@ -809,18 +809,33 @@ function Content() {
           border: none !important;
           outline: none !important;
           box-shadow: none !important;
-          background: rgba(255, 255, 255, 0.1) !important;
+          background: rgba(255, 255, 255, 0.08) !important;
+          color: #ffffff !important;
           cursor: pointer !important;
+          transition: background-color 0.15s ease, color 0.15s ease !important;
+        }
+        .paste-btn-clean svg {
+          fill: #ffffff !important;
+          color: #ffffff !important;
+          transition: fill 0.15s ease, color 0.15s ease !important;
         }
         .paste-btn-clean:focus,
         .paste-btn-clean:hover,
         .paste-btn-clean:active,
         .paste-btn-clean:focus-within {
-          background: rgba(255, 255, 255, 0.25) !important;
+          background: #ffffff !important;
+          color: #1a1f24 !important;
           border: none !important;
           outline: none !important;
           box-shadow: none !important;
           border-radius: 0px !important;
+        }
+        .paste-btn-clean:focus svg,
+        .paste-btn-clean:hover svg,
+        .paste-btn-clean:active svg,
+        .paste-btn-clean:focus-within svg {
+          fill: #1a1f24 !important;
+          color: #1a1f24 !important;
         }
       `}</style>
       <PanelSectionRow>
