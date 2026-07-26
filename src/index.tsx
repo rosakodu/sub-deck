@@ -793,7 +793,19 @@ function Content() {
         )}
       </PanelSection>
 
-      {/* Поле добавления новой подписки с кнопкой вставки из буфера обмена */}
+      <style>{`
+        .paste-btn-clean,
+        .paste-btn-clean:focus,
+        .paste-btn-clean:hover,
+        .paste-btn-clean:active,
+        .paste-btn-clean:focus-within,
+        .paste-btn-clean * {
+          border: none !important;
+          outline: none !important;
+          box-shadow: none !important;
+          border-radius: 0px !important;
+        }
+      `}</style>
       <PanelSectionRow>
         <div style={{ display: "flex", flexDirection: "column", width: "100%" }}>
           <div style={{ fontSize: "11px", fontWeight: "bold", color: "#a5a5a5", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "6px" }}>
@@ -808,6 +820,7 @@ function Content() {
             </div>
             <div style={{ width: "38px", height: "38px", minWidth: "38px", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
               <ButtonItem
+                className="paste-btn-clean"
                 layout="below"
                 onClick={handlePasteFromClipboard}
                 disabled={loading}
