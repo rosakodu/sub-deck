@@ -8,6 +8,7 @@ import subprocess
 import shutil
 import time
 import socket
+import ipaddress
 from concurrent.futures import ThreadPoolExecutor
 
 
@@ -47,12 +48,19 @@ class VPNManager:
         self.plugin_dir = plugin_dir
         self.settings_dir = settings_dir
         self.bin_dir = os.path.join(self.settings_dir, "bin")
-        self.singbox_path = os.path.join(self.bin_dir, "sing-box")
-        self.config_path = os.path.join(self.settings_dir, "sing-box-config.json")
+        self.xray_path = os.path.join(self.bin_dir, "xray")
+        self.tun2socks_path = os.path.join(self.bin_dir, "tun2socks")
+        self.singbox_path = self.xray_path  # Алиас для обратной совместимости
+        self.config_path = os.path.join(self.settings_dir, "xray-config.json")
         self.nodes_cache_path = os.path.join(self.settings_dir, "nodes.json")
         self.settings_file = os.path.join(self.settings_dir, "settings.json")
-        self.process = None
+        self.xray_process = None
+        self.tun_process = None
+        self.process = None  # Алиас
         self._logger = logger
+        self._last_server_ip = None
+        self._last_gw_ip = None
+        self._last_iface = None
 
         os.makedirs(self.bin_dir, exist_ok=True)
         os.makedirs(self.settings_dir, exist_ok=True)
@@ -311,49 +319,170 @@ class VPNManager:
 
 
     # ────────────────────────────────────────────────
-    # Загрузка sing-box
+    # Системные утилиты и проверка бинарников (Xray + tun2socks)
     # ────────────────────────────────────────────────
 
-    def download_singbox(self):
-        """Скачивает sing-box 1.9.3 для Linux amd64."""
-        if os.path.exists(self.singbox_path):
-            return True
-
-        version = "1.9.3"
-        url = (
-            f"https://github.com/SagerNet/sing-box/releases/download/v{version}/"
-            f"sing-box-{version}-linux-amd64.tar.gz"
-        )
-        tar_path = os.path.join(self.bin_dir, "sing-box.tar.gz")
-
+    def _run_cmd(self, cmd_list):
+        """Запускает системную команду, добавляя sudo если процесс не под root."""
+        cmd = list(cmd_list)
+        if os.geteuid() != 0:
+            cmd = ["sudo", "-n"] + cmd
         try:
-            import ssl, tarfile
-            self.log(f"Downloading sing-box {version}...")
-            ctx = ssl._create_unverified_context()
-            req = urllib.request.Request(url)
-            with urllib.request.urlopen(req, timeout=60, context=ctx) as resp:
-                with open(tar_path, "wb") as f:
-                    f.write(resp.read())
-
-            with tarfile.open(tar_path, "r:gz") as tar:
-                for member in tar.getmembers():
-                    if member.name.endswith("/sing-box") or member.name == "sing-box":
-                        member.name = "sing-box"
-                        try:
-                            tar.extract(member, path=self.bin_dir, filter="data")
-                        except TypeError:
-                            tar.extract(member, path=self.bin_dir)
-                        break
-
-            os.remove(tar_path)
-            os.chmod(self.singbox_path, 0o755)
-            self.log("sing-box downloaded OK")
-            return True
+            return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         except Exception as e:
-            self.log(f"Error downloading sing-box: {e}")
-            if os.path.exists(tar_path):
-                os.remove(tar_path)
+            self.log(f"Error running {' '.join(cmd)}: {e}")
+            return None
+
+    def _get_default_gateway(self):
+        """Определяет шлюз по умолчанию и физический сетевой интерфейс."""
+        try:
+            res = subprocess.run(["ip", "route", "show", "default"], stdout=subprocess.PIPE, text=True)
+            for line in res.stdout.splitlines():
+                parts = line.split()
+                if len(parts) >= 5 and parts[0] == "default" and parts[1] == "via":
+                    gw = parts[2]
+                    iface = parts[4]
+                    return gw, iface
+        except Exception as e:
+            self.log(f"Error getting default gateway: {e}")
+        return None, None
+
+    def _resolve_host(self, host):
+        """Разрешает домен в IP, чтобы исключить DNS-петлю при маршрутизации."""
+        if not host:
+            return None
+        try:
+            ipaddress.ip_address(host)
+            return host
+        except ValueError:
+            pass
+        try:
+            return socket.gethostbyname(host)
+        except Exception as e:
+            self.log(f"Failed to resolve {host}: {e}")
+            return host
+
+    def _check_socket_open(self, host, port, timeout=1.5):
+        """Проверяет доступность TCP-сокета."""
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(timeout)
+        try:
+            s.connect((host, port))
+            s.close()
+            return True
+        except Exception:
             return False
+
+    def ensure_binaries(self):
+        """Проверяет наличие Xray и tun2socks. При отсутствии копирует из defaults или скачивает."""
+        need_xray = not (os.path.exists(self.xray_path) and os.access(self.xray_path, os.X_OK))
+        need_tun = not (os.path.exists(self.tun2socks_path) and os.access(self.tun2socks_path, os.X_OK))
+
+        if not need_xray and not need_tun:
+            return True
+
+        # Сначала проверяем defaults/bin
+        defaults_xray = os.path.join(self.plugin_dir, "defaults", "bin", "xray")
+        defaults_tun = os.path.join(self.plugin_dir, "defaults", "bin", "tun2socks")
+
+        if need_xray and os.path.exists(defaults_xray) and os.access(defaults_xray, os.X_OK):
+            self.log("Copying xray from plugin defaults...")
+            try:
+                shutil.copy2(defaults_xray, self.xray_path)
+                os.chmod(self.xray_path, 0o755)
+                need_xray = False
+            except Exception as e:
+                self.log(f"Failed to copy xray from defaults: {e}")
+
+        if need_tun and os.path.exists(defaults_tun) and os.access(defaults_tun, os.X_OK):
+            self.log("Copying tun2socks from plugin defaults...")
+            try:
+                shutil.copy2(defaults_tun, self.tun2socks_path)
+                os.chmod(self.tun2socks_path, 0o755)
+                self._run_cmd(["setcap", "cap_net_admin,cap_net_raw+ep", self.tun2socks_path])
+                need_tun = False
+            except Exception as e:
+                self.log(f"Failed to copy tun2socks from defaults: {e}")
+
+        # Скопируем базы гео-файлов, если есть в defaults
+        for dat in ["geoip.dat", "geosite.dat"]:
+            dat_target = os.path.join(self.bin_dir, dat)
+            dat_default = os.path.join(self.plugin_dir, "defaults", dat)
+            if not os.path.exists(dat_target) and os.path.exists(dat_default):
+                try:
+                    shutil.copy2(dat_default, dat_target)
+                except Exception:
+                    pass
+
+        if not need_xray and not need_tun:
+            return True
+
+        import ssl, zipfile
+        ctx = ssl._create_unverified_context()
+
+        # 1. Скачивание Xray
+        if need_xray:
+            xray_zip_url = "https://github.com/XTLS/Xray-core/releases/download/v26.9.30/Xray-linux-64.zip"
+            zip_path = os.path.join(self.bin_dir, "xray.zip")
+            self.log("Downloading Xray-core v26.9.30...")
+            try:
+                req = urllib.request.Request(xray_zip_url, headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(req, timeout=90, context=ctx) as resp:
+                    with open(zip_path, "wb") as f:
+                        f.write(resp.read())
+                with zipfile.ZipFile(zip_path, "r") as z:
+                    z.extract("xray", path=self.bin_dir)
+                    for dat in ["geoip.dat", "geosite.dat"]:
+                        if dat in z.namelist():
+                            z.extract(dat, path=self.bin_dir)
+                if os.path.exists(zip_path):
+                    os.remove(zip_path)
+                os.chmod(self.xray_path, 0o755)
+                self.log("Xray-core downloaded and installed OK")
+            except Exception as e:
+                self.log(f"Failed to download Xray: {e}")
+                if os.path.exists(zip_path):
+                    try:
+                        os.remove(zip_path)
+                    except Exception:
+                        pass
+                return False
+
+        # 2. Скачивание tun2socks
+        if need_tun:
+            tun_zip_url = "https://github.com/xjasonlyu/tun2socks/releases/download/v2.7.0/tun2socks-linux-amd64.zip"
+            zip_path = os.path.join(self.bin_dir, "tun2socks.zip")
+            self.log("Downloading tun2socks v2.7.0...")
+            try:
+                req = urllib.request.Request(tun_zip_url, headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(req, timeout=60, context=ctx) as resp:
+                    with open(zip_path, "wb") as f:
+                        f.write(resp.read())
+                with zipfile.ZipFile(zip_path, "r") as z:
+                    for name in z.namelist():
+                        if "tun2socks" in name and not name.endswith(".zip"):
+                            with open(self.tun2socks_path, "wb") as f_out:
+                                f_out.write(z.read(name))
+                            break
+                if os.path.exists(zip_path):
+                    os.remove(zip_path)
+                os.chmod(self.tun2socks_path, 0o755)
+                self._run_cmd(["setcap", "cap_net_admin,cap_net_raw+ep", self.tun2socks_path])
+                self.log("tun2socks downloaded and installed OK")
+            except Exception as e:
+                self.log(f"Failed to download tun2socks: {e}")
+                if os.path.exists(zip_path):
+                    try:
+                        os.remove(zip_path)
+                    except Exception:
+                        pass
+                return False
+
+        return True
+
+    def download_singbox(self):
+        """Алиас для обратной совместимости."""
+        return self.ensure_binaries()
 
     # ────────────────────────────────────────────────
     # Парсинг подписки
@@ -568,7 +697,21 @@ class VPNManager:
         query = urllib.parse.parse_qs(parsed.query)
         params = {k: v[0] for k, v in query.items()}
         name = urllib.parse.unquote(parsed.fragment) if parsed.fragment else f"VLESS {host}:{port}"
-        
+
+        extra_val = params.get("extra", "")
+        extra_obj = None
+        if extra_val:
+            try:
+                extra_obj = json.loads(urllib.parse.unquote(extra_val))
+            except Exception:
+                try:
+                    extra_obj = json.loads(extra_val)
+                except Exception:
+                    extra_obj = None
+
+        alpn_val = params.get("alpn", "")
+        alpn_list = [a.strip() for a in alpn_val.split(",") if a.strip()] if alpn_val else []
+
         return {
             "type": "vless",
             "name": name,
@@ -579,12 +722,16 @@ class VPNManager:
             "sni": params.get("sni", ""),
             "pbk": params.get("pbk", ""),
             "sid": params.get("sid", ""),
+            "spx": params.get("spx", ""),
             "flow": params.get("flow", ""),
             "fp": params.get("fp", "chrome"),
             "transport": params.get("type", "tcp"),
             "service_name": params.get("serviceName", ""),
             "path": params.get("path", ""),
             "host": params.get("host", ""),
+            "mode": params.get("mode", ""),
+            "extra": extra_obj,
+            "alpn": alpn_list,
         }
 
     def _parse_vmess_link(self, link):
@@ -731,123 +878,165 @@ class VPNManager:
             return None
 
     # ────────────────────────────────────────────────
-    # Генерация конфига sing-box
+    # Генерация конфига Xray-core
     # ────────────────────────────────────────────────
 
     def generate_config(self, node):
-        """Создаёт sing-box-config.json с TUN-интерфейсом."""
-        # Создаем outbound-блок под тип протокола
+        """Создаёт xray-config.json с SOCKS5 inbound и соответствующим outbound."""
+        server_host = node["server"]
+        server_ip = self._resolve_host(server_host) or server_host
+        self.log(f"Generating Xray config for server: {server_host} (resolved IP: {server_ip})")
+
         outbound = {}
-        
-        if node["type"] == "vless":
-            tls_enabled = node["security"] in ("tls", "reality")
+        protocol = node.get("type")
+
+        if protocol == "vless":
+            stream_settings = {}
+            transport = node.get("transport", "tcp")
+
+            if transport == "xhttp":
+                stream_settings["network"] = "xhttp"
+                xhttp_settings = {
+                    "path": node.get("path") or "/",
+                    "host": node.get("host") or node.get("sni") or server_host,
+                    "mode": node.get("mode") or "packet-up",
+                }
+                if node.get("extra"):
+                    xhttp_settings["extra"] = node["extra"]
+                stream_settings["xhttpSettings"] = xhttp_settings
+
+                stream_settings["security"] = "tls"
+                stream_settings["tlsSettings"] = {
+                    "serverName": node.get("sni") or node.get("host") or server_host,
+                    "fingerprint": node.get("fp") or "edge",
+                    "alpn": node.get("alpn") or ["h2"]
+                }
+            elif transport == "grpc":
+                stream_settings["network"] = "grpc"
+                stream_settings["grpcSettings"] = {
+                    "serviceName": node.get("service_name", "grpc"),
+                    "multiMode": node.get("mode") == "multi"
+                }
+            elif transport in ("ws", "websocket"):
+                stream_settings["network"] = "ws"
+                ws_settings = {"path": node.get("path") or "/"}
+                if node.get("host") or node.get("sni"):
+                    ws_settings["headers"] = {"Host": node.get("host") or node.get("sni")}
+                stream_settings["wsSettings"] = ws_settings
+            else:
+                stream_settings["network"] = "tcp"
+
+            # Настройки безопасности (Reality / TLS / None)
+            security = node.get("security", "none")
+            if security == "reality":
+                stream_settings["security"] = "reality"
+                stream_settings["realitySettings"] = {
+                    "serverName": node.get("sni") or server_host,
+                    "fingerprint": node.get("fp") or "chrome",
+                    "publicKey": node.get("pbk", ""),
+                    "shortId": node.get("sid", ""),
+                    "spiderX": node.get("spx", "")
+                }
+            elif security == "tls" and transport != "xhttp":
+                stream_settings["security"] = "tls"
+                stream_settings["tlsSettings"] = {
+                    "serverName": node.get("sni") or server_host,
+                    "fingerprint": node.get("fp") or "chrome",
+                    "alpn": node.get("alpn") or []
+                }
+            elif security == "none" and transport != "xhttp":
+                stream_settings["security"] = "none"
+
+            user_obj = {
+                "id": node["uuid"],
+                "encryption": "none",
+            }
+            if node.get("flow"):
+                user_obj["flow"] = node["flow"]
+
             outbound = {
-                "type": "vless",
+                "protocol": "vless",
                 "tag": "proxy",
-                "server": node["server"],
-                "server_port": node["port"],
-                "uuid": node["uuid"],
-                **({"flow": node["flow"]} if node["flow"] else {}),
-                "tls": {
-                    "enabled": tls_enabled,
-                    "server_name": node["sni"] or None,
-                    "utls": {
-                        "enabled": True,
-                        "fingerprint": node["fp"] or "chrome",
-                    },
+                "settings": {
+                    "vnext": [
+                        {
+                            "address": server_ip,
+                            "port": node["port"],
+                            "users": [user_obj]
+                        }
+                    ]
                 },
+                "streamSettings": stream_settings
             }
-            if node["security"] == "reality":
-                outbound["tls"]["reality"] = {
-                    "enabled": True,
-                    "public_key": node["pbk"],
-                    "short_id": node["sid"],
-                }
 
-        elif node["type"] == "vmess":
+        elif protocol == "vmess":
+            stream_settings = {"network": node.get("transport", "tcp")}
+            if node.get("security") == "tls":
+                stream_settings["security"] = "tls"
+                stream_settings["tlsSettings"] = {
+                    "serverName": node.get("sni") or server_host,
+                    "fingerprint": node.get("fp") or "chrome"
+                }
             outbound = {
-                "type": "vmess",
+                "protocol": "vmess",
                 "tag": "proxy",
-                "server": node["server"],
-                "server_port": node["port"],
-                "uuid": node["uuid"],
-                "security": "auto",
-                "tls": {
-                    "enabled": node["security"] == "tls",
-                    "server_name": node["sni"] or None,
-                    "utls": {
-                        "enabled": True,
-                        "fingerprint": "chrome"
-                    }
-                }
+                "settings": {
+                    "vnext": [
+                        {
+                            "address": server_ip,
+                            "port": node["port"],
+                            "users": [
+                                {
+                                    "id": node["uuid"],
+                                    "alterId": 0,
+                                    "security": "auto"
+                                }
+                            ]
+                        }
+                    ]
+                },
+                "streamSettings": stream_settings
             }
 
-        elif node["type"] == "trojan":
+        elif protocol == "trojan":
+            stream_settings = {
+                "network": node.get("transport", "tcp"),
+                "security": "tls",
+                "tlsSettings": {
+                    "serverName": node.get("sni") or server_host,
+                    "fingerprint": node.get("fp") or "chrome"
+                }
+            }
             outbound = {
-                "type": "trojan",
+                "protocol": "trojan",
                 "tag": "proxy",
-                "server": node["server"],
-                "server_port": node["port"],
-                "password": node["password"],
-                "tls": {
-                    "enabled": True,
-                    "server_name": node["sni"] or None,
-                    "utls": {
-                        "enabled": True,
-                        "fingerprint": "chrome"
-                    }
-                }
+                "settings": {
+                    "servers": [
+                        {
+                            "address": server_ip,
+                            "port": node["port"],
+                            "password": node["password"]
+                        }
+                    ]
+                },
+                "streamSettings": stream_settings
             }
 
-        elif node["type"] == "shadowsocks":
+        elif protocol == "shadowsocks":
             outbound = {
-                "type": "shadowsocks",
+                "protocol": "shadowsocks",
                 "tag": "proxy",
-                "server": node["server"],
-                "server_port": node["port"],
-                "method": node["method"],
-                "password": node["password"],
-            }
-
-        elif node["type"] == "hysteria2":
-            outbound = {
-                "type": "hysteria2",
-                "tag": "proxy",
-                "server": node["server"],
-                "server_port": node["port"],
-                "password": node["password"],
-                "tls": {
-                    "enabled": True,
-                    "server_name": node["sni"] or None,
-                    "insecure": node.get("insecure", False)
+                "settings": {
+                    "servers": [
+                        {
+                            "address": server_ip,
+                            "port": node["port"],
+                            "method": node["method"],
+                            "password": node["password"]
+                        }
+                    ]
                 }
             }
-            obfs_type = node.get("obfs_type")
-            if obfs_type:
-                outbound["obfs"] = {
-                    "type": obfs_type,
-                    "password": node.get("obfs_password", "")
-                }
-
-        # Добавляем настройки транспорта (gRPC / WebSocket / и т.д.) для поддерживаемых протоколов
-        if node["type"] in ("vless", "vmess", "trojan"):
-            transport_type = node.get("transport", "tcp")
-            if transport_type == "grpc":
-                outbound["transport"] = {
-                    "type": "grpc",
-                    "service_name": node.get("service_name", "grpc")
-                }
-            elif transport_type in ("ws", "websocket"):
-                outbound["transport"] = {
-                    "type": "ws",
-                    "path": node.get("path", "/"),
-                }
-                if node.get("host"):
-                    outbound["transport"]["headers"] = {
-                        "Host": node["host"]
-                    }
-
-
 
         settings = self.load_settings()
         preset = settings.get("selected_preset", "default")
@@ -855,103 +1044,53 @@ class VPNManager:
 
         outbounds = [
             outbound,
-            {"type": "direct", "tag": "direct"},
-            {"type": "dns", "tag": "dns-out"},
-            {"type": "block", "tag": "block"},
+            {"protocol": "freedom", "tag": "direct", "settings": {"domainStrategy": "UseIP"}},
+            {"protocol": "blackhole", "tag": "block"}
         ]
 
-        route_config = {
-            "auto_detect_interface": True
-        }
-
+        routing_rules = []
         if preset == "roscomvpn":
-            geoip_path = os.path.join(self.settings_dir, "geoip.db")
-            geosite_path = os.path.join(self.settings_dir, "geosite.db")
-            
-            has_geoip = os.path.exists(geoip_path) and os.path.getsize(geoip_path) > 100000
-            has_geosite = os.path.exists(geosite_path) and os.path.getsize(geosite_path) > 100000
-
-            if not (has_geoip and has_geosite):
-                try:
-                    self.update_geofiles(force=True)
-                except Exception as e:
-                    self.log(f"Failed to update geofiles: {e}")
-                has_geoip = os.path.exists(geoip_path) and os.path.getsize(geoip_path) > 100000
-                has_geosite = os.path.exists(geosite_path) and os.path.getsize(geosite_path) > 100000
-
-            if has_geoip and has_geosite:
-                route_config["geoip"] = {
-                    "path": geoip_path,
-                    "download_url": "https://github.com/SagerNet/sing-geoip/releases/latest/download/geoip.db",
-                    "download_detour": "direct"
-                }
-                route_config["geosite"] = {
-                    "path": geosite_path,
-                    "download_url": "https://github.com/SagerNet/sing-geosite/releases/latest/download/geosite.db",
-                    "download_detour": "direct"
-                }
-
-                route_config["rules"] = [
-                    {"protocol": "dns", "outbound": "dns-out"},
-                    {"ip_is_private": True, "outbound": "direct"},
-                    {"geosite": ["category-ads-all"], "outbound": "block"},
-                    {"geosite": ["google-play", "github", "youtube", "telegram"], "outbound": "proxy"},
-                    {"geosite": ["private", "category-ru", "microsoft", "apple", "epicgames", "riot", "steam", "twitch", "pinterest"], "outbound": "direct"},
-                    {"domain_suffix": ["escapefromtarkov.com", "tarkov.com", "faceit.com", "fastcup.net"], "outbound": "direct"},
-                    {"geoip": ["private", "ru", "by"], "outbound": "direct"},
-                    {"protocol": ["bittorrent"], "outbound": "direct"}
-                ]
-            else:
-                self.log("Geofiles unavailable, falling back to default routing rules")
-                route_config["rules"] = [
-                    {"protocol": "dns", "outbound": "dns-out"},
-                    {"ip_is_private": True, "outbound": "direct"},
-                    {"protocol": ["bittorrent"], "outbound": "direct"}
-                ]
-        else:
-            route_config["rules"] = [
-                {"protocol": "dns", "outbound": "dns-out"},
-                {"ip_is_private": True, "outbound": "direct"},
-                {"protocol": ["bittorrent"], "outbound": "direct"}
+            routing_rules = [
+                {"type": "field", "ip": ["geoip:private"], "outboundTag": "direct"},
+                {"type": "field", "outboundTag": "proxy", "network": "tcp,udp"}
             ]
-
-        dns_rules = [
-            {"query_type": ["A", "AAAA"], "server": "dns_proxy"},
-        ]
-        if preset == "roscomvpn" and os.path.exists(os.path.join(self.settings_dir, "geosite.db")):
-            dns_rules = [
-                {"geosite": ["google-play", "github", "youtube", "telegram"], "server": "dns_proxy"}
+        else:
+            routing_rules = [
+                {"type": "field", "outboundTag": "proxy", "network": "tcp,udp"}
             ]
 
         config = {
-            "log": {"level": "info", "timestamp": True},
-            "dns": {
-                "servers": [
-                    {"tag": "dns_direct", "address": "1.1.1.1", "detour": "direct"},
-                    {"tag": "dns_proxy", "address": "tcp://8.8.8.8", "detour": "proxy"},
-                ],
-                "rules": dns_rules,
+            "log": {
+                "loglevel": "warning"
             },
             "inbounds": [
                 {
-                    "type": "tun",
-                    "tag": "tun-in",
-                    "interface_name": "tun0",
-                    "inet4_address": "172.19.0.1/30",
-                    "auto_route": True,
-                    "strict_route": True,
-                    "stack": "system",
-                    "sniff": True,
+                    "tag": "socks-in",
+                    "port": 10808,
+                    "listen": "127.0.0.1",
+                    "protocol": "socks",
+                    "settings": {
+                        "auth": "noauth",
+                        "udp": True
+                    },
+                    "sniffing": {
+                        "enabled": True,
+                        "destOverride": ["http", "tls", "quic"]
+                    }
                 }
             ],
             "outbounds": outbounds,
-            "route": route_config,
+            "routing": {
+                "domainStrategy": "AsIs",
+                "rules": routing_rules
+            }
         }
 
         with open(self.config_path, "w") as f:
             json.dump(config, f, indent=2)
 
         self.log(f"Config written to {self.config_path}")
+        return server_ip
 
     def _get_clean_env(self):
         """Очищает переменные окружения от путей PyInstaller/MEI."""
@@ -962,126 +1101,177 @@ class VPNManager:
                 env["LD_LIBRARY_PATH"] = ":".join(paths)
             else:
                 del env["LD_LIBRARY_PATH"]
+        env["XRAY_LOCATION_ASSET"] = self.bin_dir
         return env
 
     # ────────────────────────────────────────────────
-    # Управление процессом
+    # Управление процессами (Xray + tun2socks)
     # ────────────────────────────────────────────────
 
     def start(self, node):
-        """Запускает sing-box с выбранным сервером."""
-        self.stop()  # гасим предыдущий процесс
+        """Запускает связку Xray + tun2socks с выбранным сервером."""
+        self.stop()  # гасим предыдущие процессы и маршруты
 
-        if not self.download_singbox():
-            self.log("sing-box not available, aborting start")
+        if not self.ensure_binaries():
+            self.log("Required binaries (xray/tun2socks) not available, aborting start")
             return False
 
-        # Убедимся, что базы скачаны, если выбран пресет RoscomVPN
-        settings = self.load_settings()
-        if settings.get("selected_preset") == "roscomvpn":
-            self.log("Preset is RoscomVPN. Checking and updating geofiles...")
-            try:
-                self.update_geofiles(False)
-            except Exception as e:
-                self.log(f"Failed to update geofiles before start: {e}")
+        gw_ip, iface = self._get_default_gateway()
+        self.log(f"Detected default gateway: {gw_ip} via {iface}")
 
-        self.generate_config(node)
+        server_ip = self.generate_config(node)
 
-        log_file_path = os.path.join(self.settings_dir, "sing-box.log")
+        # 1. Запуск Xray
+        xray_log_path = os.path.join(self.settings_dir, "xray.log")
         try:
-            log_file = open(log_file_path, "w")
-            self.process = subprocess.Popen(
-                [self.singbox_path, "run", "-c", self.config_path],
-                stdout=log_file,
-                stderr=log_file,
+            xray_log = open(xray_log_path, "w")
+            self.xray_process = subprocess.Popen(
+                [self.xray_path, "-config", self.config_path],
+                stdout=xray_log,
+                stderr=xray_log,
                 env=self._get_clean_env(),
                 start_new_session=True
             )
-            log_file.close() # Закрываем дескриптор в Python после наследования процессом
-            self.log(f"sing-box started, PID={self.process.pid}. Logs: {log_file_path}")
-
-            settings = self.load_settings()
-            settings["selected_node"] = node
-            self.save_settings(settings)
-            return True
+            xray_log.close()
+            self.log(f"xray started, PID={self.xray_process.pid}. Logs: {xray_log_path}")
         except Exception as e:
-            self.log(f"Failed to start sing-box: {e}")
+            self.log(f"Failed to start xray: {e}")
+            self.stop()
             return False
 
-    def stop(self):
-        """Останавливает все процессы sing-box и ждет их завершения."""
-        self.log("Stopping sing-box...")
-        if self.process:
-            try:
-                self.process.terminate()
-            except Exception:
-                pass
+        # Ожидаем готовности SOCKS-порта Xray
+        time.sleep(1.0)
+        if not self._check_socket_open("127.0.0.1", 10808):
+            self.log("Xray failed to bind to 127.0.0.1:10808")
+            self.stop()
+            return False
 
+        # 2. Запуск tun2socks
+        tun_log_path = os.path.join(self.settings_dir, "tun2socks.log")
         try:
-            cmd_pattern = f"^{self.singbox_path}"
-            subprocess.run(
-                ["pkill", "-f", cmd_pattern],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+            tun_log = open(tun_log_path, "w")
+            self.tun_process = subprocess.Popen(
+                [self.tun2socks_path, "-d", "tun0", "-p", "socks5://127.0.0.1:10808"],
+                stdout=tun_log,
+                stderr=tun_log,
+                env=self._get_clean_env(),
+                start_new_session=True
             )
+            tun_log.close()
+            self.log(f"tun2socks started, PID={self.tun_process.pid}. Logs: {tun_log_path}")
         except Exception as e:
-            self.log(f"Error calling pkill: {e}")
+            self.log(f"Failed to start tun2socks: {e}")
+            self.stop()
+            return False
 
-        start_time = time.time()
-        while time.time() - start_time < 3:
-            if not self.is_running():
-                self.log("sing-box stopped cleanly.")
-                break
-            time.sleep(0.2)
-        else:
-            self.log("sing-box did not stop in time, sending SIGKILL...")
-            try:
-                cmd_pattern = f"^{self.singbox_path}"
-                subprocess.run(
-                    ["pkill", "-9", "-f", cmd_pattern],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
-            except Exception:
-                pass
-            
-            try:
-                subprocess.run(
-                    ["ip", "link", "delete", "tun0"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
-                self.log("Force deleted tun0 interface.")
-            except Exception:
-                pass
+        # Ожидаем создания интерфейса tun0
+        time.sleep(0.8)
 
-        if self.process:
-            self.process = None
+        # 3. Настройка tun0 и маршрутизации
+        self._run_cmd(["ip", "addr", "add", "198.18.0.1/15", "dev", "tun0"])
+        self._run_cmd(["ip", "link", "set", "dev", "tun0", "up"])
+
+        # Защита от зацикливания: трафик до VPN-сервера направляем через физический шлюз
+        if server_ip and gw_ip and iface:
+            self._run_cmd(["ip", "route", "add", server_ip, "via", gw_ip, "dev", iface])
+
+        # Перенаправляем весь остальной трафик в tun0 с высшим приоритетом (metric 1)
+        self._run_cmd(["ip", "route", "add", "default", "dev", "tun0", "metric", "1"])
+
+        # Настраиваем DNS через tun0
+        self._run_cmd(["resolvectl", "dns", "tun0", "8.8.8.8", "1.1.1.1"])
+        self._run_cmd(["resolvectl", "domain", "tun0", "~."])
+        self._run_cmd(["resolvectl", "default-route", "tun0", "yes"])
+
+        self._last_server_ip = server_ip
+        self._last_gw_ip = gw_ip
+        self._last_iface = iface
 
         settings = self.load_settings()
-        settings["selected_node"] = None
+        settings["selected_node"] = node
+        settings["_routing_state"] = {
+            "server_ip": server_ip,
+            "gw_ip": gw_ip,
+            "iface": iface
+        }
         self.save_settings(settings)
-        self.log("sing-box stopped")
+        self.log(f"VPN connected successfully to {node.get('name')}")
+        return True
+
+    def stop(self):
+        """Останавливает tun2socks, xray и восстанавливает маршруты."""
+        self.log("Stopping VPN (xray + tun2socks)...")
+
+        settings = self.load_settings()
+        routing_state = settings.get("_routing_state") or {}
+        server_ip = self._last_server_ip or routing_state.get("server_ip")
+        gw_ip = self._last_gw_ip or routing_state.get("gw_ip")
+        iface = self._last_iface or routing_state.get("iface")
+
+        # Восстановление маршрутизации
+        self._run_cmd(["ip", "route", "del", "default", "dev", "tun0", "metric", "1"])
+        if server_ip and gw_ip and iface:
+            self._run_cmd(["ip", "route", "del", server_ip, "via", gw_ip, "dev", iface])
+        self._run_cmd(["resolvectl", "revert", "tun0"])
+        self._run_cmd(["ip", "link", "delete", "tun0"])
+
+        # Остановка процессов
+        for proc in (self.tun_process, self.xray_process, self.process):
+            if proc:
+                try:
+                    proc.terminate()
+                except Exception:
+                    pass
+
+        try:
+            subprocess.run(["pkill", "-f", self.tun2socks_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["pkill", "-f", self.xray_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
+        time.sleep(0.5)
+
+        for proc_name in ("xray", "tun2socks"):
+            try:
+                subprocess.run(["pkill", "-9", "-x", proc_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except Exception:
+                pass
+
+        self.tun_process = None
+        self.xray_process = None
+        self.process = None
+        self._last_server_ip = None
+        self._last_gw_ip = None
+        self._last_iface = None
+
+        settings["selected_node"] = None
+        settings.pop("_routing_state", None)
+        self.save_settings(settings)
+        self.log("VPN stopped cleanly.")
 
     def is_running(self):
-        """Проверяет, запущен ли sing-box."""
+        """Проверяет, запущены ли процессы VPN."""
         try:
-            # -x проверяет точное совпадение имени процесса
-            res = subprocess.run(["pgrep", "-x", "sing-box"], stdout=subprocess.PIPE)
-            return res.returncode == 0
+            res_xray = subprocess.run(["pgrep", "-x", "xray"], stdout=subprocess.PIPE)
+            res_tun = subprocess.run(["pgrep", "-x", "tun2socks"], stdout=subprocess.PIPE)
+            return res_xray.returncode == 0 and res_tun.returncode == 0
         except Exception:
             return False
 
     def get_singbox_log(self):
-        """Возвращает последние 50 строк лога sing-box."""
-        log_file_path = os.path.join(self.settings_dir, "sing-box.log")
-        if not os.path.exists(log_file_path):
-            return "No logs found."
-        try:
-            with open(log_file_path, "r", errors="replace") as f:
-                lines = f.readlines()
-                return "".join(lines[-50:])
-        except Exception as e:
-            return f"Error reading log: {e}"
+        """Возвращает логи Xray и tun2socks."""
+        logs = []
+        for name, fname in [("XRAY", "xray.log"), ("TUN2SOCKS", "tun2socks.log")]:
+            fpath = os.path.join(self.settings_dir, fname)
+            if os.path.exists(fpath):
+                try:
+                    with open(fpath, "r", errors="replace") as f:
+                        lines = f.readlines()
+                        logs.append(f"=== {name} LOGS ===\n" + "".join(lines[-30:]))
+                except Exception as e:
+                    logs.append(f"=== {name} LOGS ===\nError reading: {e}")
+            else:
+                logs.append(f"=== {name} LOGS ===\nNo log file found.")
+        return "\n\n".join(logs)
 
 

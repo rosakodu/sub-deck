@@ -164,21 +164,33 @@ class Plugin:
                     except Exception as e:
                         plugin_logs = f"Error reading sub-deck logs from {log_path}: {e}"
 
-            singbox_log_path = os.path.join(self.vpn.settings_dir, "sing-box.log")
-            singbox_logs = "--- No sing-box logs found ---"
-            if os.path.exists(singbox_log_path):
+            xray_log_path = os.path.join(self.vpn.settings_dir, "xray.log")
+            tun_log_path = os.path.join(self.vpn.settings_dir, "tun2socks.log")
+            xray_logs = "--- No xray logs found ---"
+            tun_logs = "--- No tun2socks logs found ---"
+            if os.path.exists(xray_log_path):
                 try:
-                    with open(singbox_log_path, "r", errors="replace", encoding="utf-8") as f:
+                    with open(xray_log_path, "r", errors="replace", encoding="utf-8") as f:
                         lines = f.readlines()
-                        singbox_logs = "".join(lines[-250:]) # Последние 250 строк
+                        xray_logs = "".join(lines[-250:])
                 except Exception as e:
-                    singbox_logs = f"Error reading sing-box logs: {e}"
+                    xray_logs = f"Error reading xray logs: {e}"
+
+            if os.path.exists(tun_log_path):
+                try:
+                    with open(tun_log_path, "r", errors="replace", encoding="utf-8") as f:
+                        lines = f.readlines()
+                        tun_logs = "".join(lines[-250:])
+                except Exception as e:
+                    tun_logs = f"Error reading tun2socks logs: {e}"
             
             combined = (
                 "=== SUB-DECK SYSTEM LOGS ===\n"
                 f"{plugin_logs}\n\n"
-                "=== SING-BOX CORE LOGS ===\n"
-                f"{singbox_logs}\n"
+                "=== XRAY CORE LOGS ===\n"
+                f"{xray_logs}\n\n"
+                "=== TUN2SOCKS LOGS ===\n"
+                f"{tun_logs}\n"
             )
             
             # Сохраняем в доступное место на Steam Deck
