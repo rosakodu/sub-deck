@@ -1,0 +1,54 @@
+export interface NodeConfig {
+  name: string;
+  uuid: string;
+  server: string;
+  port: number;
+  type: string;
+  security: string;
+  sni: string;
+  pbk: string;
+  sid: string;
+  flow: string;
+  fp: string;
+  subscription_url?: string;
+  transport?: string;
+  method?: string;
+}
+
+export type TranslationKeys =
+  | "title"
+  | "subUrlLabel"
+  | "addSubBtn"
+  | "updating"
+  | "selectedServer"
+  | "nodesTitle"
+  | "selectNodeFirst"
+  | "deactivateFirst"
+  | "success"
+  | "error"
+  | "loadedNodes"
+  | "noNodesFound"
+  | "tunnelStartFailed"
+  | "tunnelStarted"
+  | "tunnelStartedBody"
+  | "tunnelStopped"
+  | "tunnelStoppedBody"
+  | "toastWarning"
+  | "toastSelectedNode"
+  | "logButton"
+  | "subscriptionsTitle"
+  | "noSubscriptions"
+  | "deleteBtn"
+  | "updateBtn"
+  | "presetLabel"
+  | "presetDefault"
+  | "presetRoscom"
+  | "addFreeBtn"
+  | "loadedNodesForSub"
+  | "freeConfigsUpdated"
+  | "supportBtn"
+  | "logCreatedTitle"
+  | "logCreated"
+  | "pasteBtn"
+  | "pastedFromClipboard"
+  | "clipboardEmptyOrBlocked";

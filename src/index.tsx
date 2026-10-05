@@ -5,34 +5,27 @@ import {
   TextField,
   Navigation,
   Focusable,
-  staticClasses
+  staticClasses,
 } from "@decky/ui";
 import {
   callable,
   definePlugin,
-  toaster
+  toaster,
 } from "@decky/api";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { FaNetworkWired, FaClipboard } from "react-icons/fa";
 
-interface NodeConfig {
-  name: string;
-  uuid: string;
-  server: string;
-  port: number;
-  type: string;
-  security: string;
-  sni: string;
-  pbk: string;
-  sid: string;
-  flow: string;
-  fp: string;
-  subscription_url?: string;
-  transport?: string;
-  method?: string;
-}
+import { NodeConfig, TranslationKeys } from "./types";
+import { SUPPORT_COMMUNITY_URL, PASTE_BUTTON_CSS } from "./constants";
+import { translations, getTranslation } from "./i18n";
+import {
+  isFreeSubscriptionUrl,
+  getDomainLabel,
+  getNodeMethodLabel,
+  readClipboardText,
+} from "./utils";
 
-// Связываем функции бэкенда с фронтендом
+// Backend RPC bridge
 const getSettings = callable<[], { subscriptions: string[]; selected_node: NodeConfig | null; selected_preset?: string }>("get_settings");
 const addSubscription = callable<[url: string], NodeConfig[]>("add_subscription");
 const addFreeSubscriptions = callable<[], NodeConfig[]>("add_free_subscriptions");
@@ -47,368 +40,10 @@ const getSteamLanguage = callable<[], string>("get_steam_language");
 const exportLogs = callable<[], string>("export_logs");
 const getClipboard = callable<[], string>("get_clipboard");
 
-type TranslationKeys =
-  | "title"
-  | "subUrlLabel"
-  | "addSubBtn"
-  | "updating"
-  | "selectedServer"
-  | "nodesTitle"
-  | "selectNodeFirst"
-  | "deactivateFirst"
-  | "success"
-  | "error"
-  | "loadedNodes"
-  | "noNodesFound"
-  | "tunnelStartFailed"
-  | "tunnelStarted"
-  | "tunnelStartedBody"
-  | "tunnelStopped"
-  | "tunnelStoppedBody"
-  | "toastWarning"
-  | "toastSelectedNode"
-  | "logButton"
-  | "subscriptionsTitle"
-  | "noSubscriptions"
-  | "deleteBtn"
-  | "updateBtn"
-  | "presetLabel"
-  | "presetDefault"
-  | "presetRoscom"
-  | "addFreeBtn"
-  | "loadedNodesForSub"
-  | "freeConfigsUpdated"
-  | "supportBtn"
-  | "logCreatedTitle"
-  | "logCreated"
-  | "pasteBtn"
-  | "pastedFromClipboard"
-  | "clipboardEmptyOrBlocked";
-
-const translations: Record<string, Record<TranslationKeys, string>> = {
-  english: {
-    title: "VLESS Management",
-    subUrlLabel: "Subscription Link",
-    addSubBtn: "Add Subscription",
-    updating: "Loading...",
-    selectedServer: "Connected to: {name}",
-    nodesTitle: "Available Servers ({count})",
-    selectNodeFirst: "Select a server first",
-    deactivateFirst: "Deactivate current connection first",
-    success: "Success",
-    error: "Error",
-    loadedNodes: "Loaded servers: {count}",
-    noNodesFound: "No servers found. Check LOG.",
-    tunnelStartFailed: "Failed to start tunnel",
-    tunnelStarted: "VPN Connected",
-    tunnelStartedBody: "Server: {name}",
-    tunnelStopped: "VPN Disconnected",
-    tunnelStoppedBody: "Tunnel stopped",
-    toastWarning: "Warning",
-    toastSelectedNode: "Server selected: {name}",
-    logButton: "LOG",
-    subscriptionsTitle: "My Subscriptions",
-    noSubscriptions: "No subscriptions added",
-    deleteBtn: "Delete",
-    updateBtn: "Update",
-    presetLabel: "Routing Preset",
-    presetDefault: "Default",
-    presetRoscom: "RoscomVPN",
-    addFreeBtn: "Free Subscriptions",
-    loadedNodesForSub: "Subscription nodes updated: {count}",
-    freeConfigsUpdated: "Free subscriptions updated",
-    supportBtn: "Support",
-    logCreatedTitle: "Log Created",
-    logCreated: "Log saved to sub-deck.log",
-    pasteBtn: "Paste",
-    pastedFromClipboard: "Pasted from clipboard",
-    clipboardEmptyOrBlocked: "Clipboard is empty or access blocked"
-  },
-  russian: {
-    title: "Управление VLESS",
-    subUrlLabel: "Ссылка на подписку",
-    addSubBtn: "Добавить подписку",
-    updating: "Загрузка...",
-    selectedServer: "Подключено к: {name}",
-    nodesTitle: "Доступные серверы ({count})",
-    selectNodeFirst: "Сначала выберите ноду для подключения",
-    deactivateFirst: "Сначала отключите текущее соединение",
-    success: "Успех",
-    error: "Ошибка",
-    loadedNodes: "Загружено нод: {count}",
-    noNodesFound: "Нод не найдено. Проверьте LOG.",
-    tunnelStartFailed: "Не удалось запустить туннель",
-    tunnelStarted: "VPN Подключен",
-    tunnelStartedBody: "Сервер: {name}",
-    tunnelStopped: "VPN Отключен",
-    tunnelStoppedBody: "Туннель остановлен",
-    toastWarning: "Внимание",
-    toastSelectedNode: "Сервер выбран: {name}",
-    logButton: "LOG",
-    subscriptionsTitle: "Мои подписки",
-    noSubscriptions: "Нет добавленных подписок",
-    deleteBtn: "Удалить",
-    updateBtn: "Обновить",
-    presetLabel: "Режим маршрутизации",
-    presetDefault: "По умолчанию",
-    presetRoscom: "RoscomVPN",
-    addFreeBtn: "Бесплатные подписки",
-    loadedNodesForSub: "Обновлено нод в этой подписке: {count}",
-    freeConfigsUpdated: "Бесплатные подписки обновлены",
-    supportBtn: "Поддержка",
-    logCreatedTitle: "Лог создан",
-    logCreated: "Лог сохранен в sub-deck.log",
-    pasteBtn: "Вставить",
-    pastedFromClipboard: "Вставлено из буфера обмена",
-    clipboardEmptyOrBlocked: "Буфер обмена пуст или доступ ограничен"
-  },
-  schinese: {
-    title: "VLESS 管理",
-    subUrlLabel: "订阅链接",
-    addSubBtn: "添加订阅",
-    updating: "正在加载...",
-    selectedServer: "已连接: {name}",
-    nodesTitle: "可用服务器 ({count})",
-    selectNodeFirst: "请先选择一个连接服务器",
-    deactivateFirst: "请先断开当前连接",
-    success: "成功",
-    error: "错误",
-    loadedNodes: "已加载服务器数量: {count}",
-    noNodesFound: "未找到节点。请检查 LOG。",
-    tunnelStartFailed: "启动隧道失败",
-    tunnelStarted: "VPN 已连接",
-    tunnelStartedBody: "服务器: {name}",
-    tunnelStopped: "VPN 已断开",
-    tunnelStoppedBody: "隧道已停止",
-    toastWarning: "警告",
-    toastSelectedNode: "已选择服务器: {name}",
-    logButton: "LOG",
-    subscriptionsTitle: "我的订阅",
-    noSubscriptions: "无订阅链接",
-    deleteBtn: "删除",
-    updateBtn: "更新",
-    presetLabel: "分流规则",
-    presetDefault: "默认",
-    presetRoscom: "RoscomVPN",
-    addFreeBtn: "免费订阅",
-    loadedNodesForSub: "此订阅已更新节点: {count}",
-    freeConfigsUpdated: "免费订阅已更新",
-    supportBtn: "支持",
-    logCreatedTitle: "日志已创建",
-    logCreated: "日志已保存至 sub-deck.log",
-    pasteBtn: "粘贴",
-    pastedFromClipboard: "已从剪贴板粘贴",
-    clipboardEmptyOrBlocked: "剪贴板为空或拒绝访问"
-  },
-  tchinese: {
-    title: "VLESS 管理",
-    subUrlLabel: "訂閱連結",
-    addSubBtn: "添加訂閱",
-    updating: "正在載入...",
-    selectedServer: "已連線: {name}",
-    nodesTitle: "可用伺服器 ({count})",
-    selectNodeFirst: "請先選擇一個連線伺服器",
-    deactivateFirst: "請先中斷當前連線",
-    success: "成功",
-    error: "錯誤",
-    loadedNodes: "已載入伺服器數量: {count}",
-    noNodesFound: "未找到節點。請檢查 LOG。",
-    tunnelStartFailed: "啟動隧道失敗",
-    tunnelStarted: "VPN 已連線",
-    tunnelStartedBody: "伺服器: {name}",
-    tunnelStopped: "VPN 已斷開",
-    tunnelStoppedBody: "隧道已停止",
-    toastWarning: "警告",
-    toastSelectedNode: "已選擇伺服器: {name}",
-    logButton: "LOG",
-    subscriptionsTitle: "我的訂閱",
-    noSubscriptions: "無訂閱連結",
-    deleteBtn: "刪除",
-    updateBtn: "更新",
-    presetLabel: "分流規則",
-    presetDefault: "默認",
-    presetRoscom: "RoscomVPN",
-    addFreeBtn: "免費訂閱",
-    loadedNodesForSub: "此訂閱已更新節點: {count}",
-    freeConfigsUpdated: "免費訂閱已更新",
-    supportBtn: "支援",
-    logCreatedTitle: "日誌已建立",
-    logCreated: "日誌已儲存至 sub-deck.log",
-    pasteBtn: "貼上",
-    pastedFromClipboard: "已從剪貼簿貼上",
-    clipboardEmptyOrBlocked: "剪貼簿為空或拒絕存取"
-  },
-  arabic: {
-    title: "إدارة VLESS",
-    subUrlLabel: "رابط الاشتراك",
-    addSubBtn: "إضافة اشتراك",
-    updating: "جاري التحميل...",
-    selectedServer: "متصل بـ: {name}",
-    nodesTitle: "الخوادم المتاحة ({count})",
-    selectNodeFirst: "الرجاء اختيار خادم أولاً للاتصال",
-    deactivateFirst: "الرجاء إيقاف الاتصال الحالي أولاً",
-    success: "نجاح",
-    error: "خطأ",
-    loadedNodes: "عدد الخوادم المحملة: {count}",
-    noNodesFound: "لم يتم العثور على خوادم. تحقق من السجل LOG.",
-    tunnelStartFailed: "فشل بدء النفق",
-    tunnelStarted: "تم تفعيل الـ VPN",
-    tunnelStartedBody: "الخادم: {name}",
-    tunnelStopped: "تم إيقاف الـ VPN",
-    tunnelStoppedBody: "تم إيقاف النفق",
-    toastWarning: "تحذير",
-    toastSelectedNode: "تم اختيار الخادم: {name}",
-    logButton: "LOG",
-    subscriptionsTitle: "اشتراكاتي",
-    noSubscriptions: "لا توجد اشتراكات مضافة",
-    deleteBtn: "حذف",
-    updateBtn: "تحديث",
-    presetLabel: "وضع التوجيه",
-    presetDefault: "الافتراضي",
-    presetRoscom: "RoscomVPN",
-    addFreeBtn: "اشتراكات مجانية",
-    loadedNodesForSub: "تم تحديث عقد الاشتراك: {count}",
-    freeConfigsUpdated: "تم تحديث الاشتراكات المجانية",
-    supportBtn: "الدعم",
-    logCreatedTitle: "تم إنشاء السجل",
-    logCreated: "تم حفظ السجل في sub-deck.log",
-    pasteBtn: "لصق",
-    pastedFromClipboard: "تم اللصق من الحافظة",
-    clipboardEmptyOrBlocked: "الحافظة فارغة أو تم رفض الوصول"
-  },
-  persian: {
-    title: "مدیریت VLESS",
-    subUrlLabel: "لینک اشتراک",
-    addSubBtn: "افزودن اشتراک",
-    updating: "در حال بارگذاری...",
-    selectedServer: "متصل به: {name}",
-    nodesTitle: "سرورهای در دسترس ({count})",
-    selectNodeFirst: "ابتدا سروری را برای اتصال انتخاب کنید",
-    deactivateFirst: "ابتدا اتصال فعلی را قطع کنید",
-    success: "موفقیت",
-    error: "خطا",
-    loadedNodes: "سرورهای بارگذاری شده: {count}",
-    noNodesFound: "هیچ گره‌ای یافت نشد. لاگ (LOG) را بررسی کنید.",
-    tunnelStartFailed: "شروع تونل ناموفق بود",
-    tunnelStarted: "VPN متصل شد",
-    tunnelStartedBody: "سرور: {name}",
-    tunnelStopped: "VPN قطع شد",
-    tunnelStoppedBody: "تونل متوقف شد",
-    toastWarning: "هشدار",
-    toastSelectedNode: "سرور انتخاب شد: {name}",
-    logButton: "LOG",
-    subscriptionsTitle: "اشتراک‌های من",
-    noSubscriptions: "هیچ اشتراکی اضافه نشده است",
-    deleteBtn: "حذف",
-    updateBtn: "به‌روزرسانی",
-    presetLabel: "حالت مسیریابی",
-    presetDefault: "پیش‌فرض",
-    presetRoscom: "RoscomVPN",
-    addFreeBtn: "اشتراک‌های رایگان",
-    loadedNodesForSub: "گره‌های اشتراک به‌روزرسانی شد: {count}",
-    freeConfigsUpdated: "اشتراک‌های رایگان به‌روزرسانی شدند",
-    supportBtn: "پشتیبانی",
-    logCreatedTitle: "لاگ ایجاد شد",
-    logCreated: "لاگ در sub-deck.log ذخیره شد",
-    pasteBtn: "جای‌گذاری",
-    pastedFromClipboard: "از کلیپ‌بورد جای‌گذاری شد",
-    clipboardEmptyOrBlocked: "کلیپ‌بورد خالی است یا دسترسی مسدود شده"
-  },
-  turkish: {
-    title: "VPN Yapılandırmaları",
-    subUrlLabel: "Abonelik Bağlantısı",
-    addSubBtn: "Abonelik Ekle",
-    updating: "Yükleniyor...",
-    selectedServer: "Bağlanılan: {name}",
-    nodesTitle: "Kullanılabilir Sunucular ({count})",
-    selectNodeFirst: "Önce bir sunucu seçin",
-    deactivateFirst: "Önce mevcut bağlantıyı kapatın",
-    success: "Başarılı",
-    error: "Hata",
-    loadedNodes: "Yüklenen sunucu sayısı: {count}",
-    noNodesFound: "Sunucu bulunamadı. LOG dosyasını kontrol edin.",
-    tunnelStartFailed: "Tünel başlatılamadı",
-    tunnelStarted: "VPN Bağlandı",
-    tunnelStartedBody: "Sunucu: {name}",
-    tunnelStopped: "VPN Bağlantısı Kesildi",
-    tunnelStoppedBody: "Tünel durduruldu",
-    toastWarning: "Uyarı",
-    toastSelectedNode: "Sunucu seçildi: {name}",
-    logButton: "LOG",
-    subscriptionsTitle: "Aboneliklerim",
-    noSubscriptions: "Eklenmiş abonelik yok",
-    deleteBtn: "Sil",
-    updateBtn: "Güncelle",
-    presetLabel: "Yönlendirme Modu",
-    presetDefault: "Varsayılan",
-    presetRoscom: "RoscomVPN",
-    addFreeBtn: "Ücretsiz Abonelikler",
-    loadedNodesForSub: "Bu abonelikteki sunucular güncellendi: {count}",
-    freeConfigsUpdated: "Ücretsiz abonelikler güncellendi",
-    supportBtn: "Destek",
-    logCreatedTitle: "Günlük Oluşturuldu",
-    logCreated: "Günlük sub-deck.log dosyasına kaydedildi",
-    pasteBtn: "Yapıştır",
-    pastedFromClipboard: "Panodan yapıştırıldı",
-    clipboardEmptyOrBlocked: "Pano boş veya erişim engellendi"
-  }
-};
-
-translations.farsi = translations.persian;
-
-// Хелпер получения читаемого домена из URL подписки
-function getDomainLabel(url: string, lang: string): string {
-  if (url.includes("igareck/vpn-configs-for-russia")) {
-    if (lang === "russian") return "Подписка igareck";
-    if (lang === "schinese") return "igareck 订阅";
-    if (lang === "tchinese") return "igareck 訂閱";
-    if (lang === "arabic") return "اشتراك igareck";
-    if (lang === "persian") return "اشتراک igareck";
-    if (lang === "turkish") return "igareck Aboneliği";
-    return "igareck Subscription";
-  }
-  if (url.toLowerCase().includes("avencores/goida-vpn-configs") || url.includes("goida-vpn-configs")) {
-    if (lang === "russian") return "Подписка Goida VPN AvenCores";
-    if (lang === "schinese") return "Goida VPN AvenCores 订阅";
-    if (lang === "tchinese") return "Goida VPN AvenCores 訂閱";
-    if (lang === "arabic") return "اشتراك Goida VPN AvenCores";
-    if (lang === "persian") return "اشتراک Goida VPN AvenCores";
-    if (lang === "turkish") return "Goida VPN AvenCores Aboneliği";
-    return "Goida VPN AvenCores Subscription";
-  }
-  if (url.includes("zieng2/wl")) {
-    if (lang === "russian") return "Подписка zieng2";
-    if (lang === "schinese") return "zieng2 订阅";
-    if (lang === "tchinese") return "zieng2 訂閱";
-    if (lang === "arabic") return "اشتراك zieng2";
-    if (lang === "persian") return "اشتراک zieng2";
-    if (lang === "turkish") return "zieng2 Aboneliği";
-    return "zieng2 Subscription";
-  }
-  try {
-    const parsed = new URL(url);
-    return parsed.hostname;
-  } catch (e) {
-    return url.length > 25 ? url.substring(0, 22) + "..." : url;
-  }
-}
-
-// Хелпер для форматирования метода подключения (Protocol/Transport/Security)
-function getNodeMethodLabel(node: NodeConfig): string {
-  const protocol = (node.type || "unknown").toUpperCase();
-  
-  if (protocol === "SHADOWSOCKS") {
-    const method = (node.method || "unknown").toUpperCase();
-    return `${protocol}/${method}`;
-  }
-  
-  let transport = (node.transport || "tcp").toUpperCase();
-  if (protocol === "HYSTERIA2") {
-    transport = "UDP";
-  }
-  
-  const security = (node.security || "none").toUpperCase();
-  return `${protocol}/${transport}/${security}`;
+function unwrap<T>(payload: any): T {
+  return payload && typeof payload === "object" && "result" in payload
+    ? payload.result
+    : payload;
 }
 
 function Content() {
@@ -423,26 +58,36 @@ function Content() {
   const [expandedSubs, setExpandedSubs] = useState<Record<string, boolean>>({});
   const [presetExpanded, setPresetExpanded] = useState<boolean>(false);
 
-  // Хук локализации
-  const t = useMemo(() => {
-    return (key: TranslationKeys, params?: Record<string, string | number>) => {
-      const dict = translations[lang] || translations.english;
-      let val = dict[key] || translations.english[key] || String(key);
-      if (params) {
-        Object.entries(params).forEach(([k, v]) => {
-          val = val.replace(`{${k}}`, String(v));
-        });
-      }
-      return val;
-    };
-  }, [lang]);
+  // Localization translator
+  const t = useCallback(
+    (key: TranslationKeys, params?: Record<string, string | number>) => {
+      return getTranslation(lang, key, params);
+    },
+    [lang]
+  );
 
-  // Инициализация
+  // Memoized nodes grouped by subscription URL to avoid O(N*M) filtration on render
+  const nodesBySubscription = useMemo(() => {
+    const map: Record<string, NodeConfig[]> = {};
+    for (const node of nodes) {
+      const url = node.subscription_url || "";
+      if (!map[url]) {
+        map[url] = [];
+      }
+      map[url].push(node);
+    }
+    return map;
+  }, [nodes]);
+
+  // Initialization lifecycle
   useEffect(() => {
+    let mounted = true;
+
     const init = async () => {
       try {
         getSteamLanguage()
           .then((detectedLang) => {
+            if (!mounted) return;
             const normalized = detectedLang?.toLowerCase();
             if (translations[normalized]) {
               setLang(normalized);
@@ -451,8 +96,8 @@ function Content() {
           .catch(console.error);
 
         const rawSettings = await getSettings();
-        const settings = (rawSettings as any)?.result ?? rawSettings;
-        if (settings) {
+        const settings = unwrap<any>(rawSettings);
+        if (settings && mounted) {
           setSubscriptions(settings.subscriptions || []);
           setSelectedNode(settings.selected_node || null);
           if (settings.selected_preset) {
@@ -461,20 +106,38 @@ function Content() {
         }
 
         const rawNodes = await getNodes();
-        const cachedNodes: NodeConfig[] = Array.isArray(rawNodes)
-          ? rawNodes
-          : (rawNodes as any)?.result ?? [];
-        setNodes(cachedNodes);
+        const cachedNodes = unwrap<NodeConfig[]>(rawNodes) || [];
+        if (mounted) {
+          setNodes(Array.isArray(cachedNodes) ? cachedNodes : []);
+        }
 
-        const running = await isConnected();
-        const rawRunning: any = running;
-        setConnected(!!(rawRunning?.result ?? rawRunning));
+        const rawRunning = await isConnected();
+        if (mounted) {
+          setConnected(!!unwrap<boolean>(rawRunning));
+        }
       } catch (err) {
         console.error("Initialization error:", err);
       }
     };
+
     init();
+
+    return () => {
+      mounted = false;
+    };
   }, []);
+
+  const refreshSubscriptions = async () => {
+    try {
+      const rawSettings = await getSettings();
+      const settings = unwrap<any>(rawSettings);
+      if (settings?.subscriptions) {
+        setSubscriptions(settings.subscriptions);
+      }
+    } catch (e) {
+      console.error("Failed to refresh subscriptions:", e);
+    }
+  };
 
   const handlePresetChange = async (presetName: string, presetLabel: string) => {
     setPreset(presetName);
@@ -490,19 +153,14 @@ function Content() {
     setLoading(true);
     try {
       const raw = await addFreeSubscriptions();
-      const fetchedNodes = Array.isArray(raw) ? raw : (raw as any)?.result ?? [];
-      setNodes(fetchedNodes);
+      const fetchedNodes = unwrap<NodeConfig[]>(raw) || [];
+      setNodes(Array.isArray(fetchedNodes) ? fetchedNodes : []);
       setInputUrl("");
       toaster.toast({
         title: t("success"),
-        body: t("freeConfigsUpdated")
+        body: t("freeConfigsUpdated"),
       });
-      
-      const rawSettings = await getSettings();
-      const settings = (rawSettings as any)?.result ?? rawSettings;
-      if (settings) {
-        setSubscriptions(settings.subscriptions || []);
-      }
+      await refreshSubscriptions();
     } catch (err) {
       toaster.toast({ title: t("error"), body: `${err}` });
     } finally {
@@ -518,30 +176,18 @@ function Content() {
     setLoading(true);
     try {
       const raw = await addSubscription(inputUrl);
-      const fetchedNodes: NodeConfig[] = Array.isArray(raw)
-        ? raw
-        : (raw as any)?.result ?? [];
+      const fetchedNodes = unwrap<NodeConfig[]>(raw) || [];
+      const nodeArray = Array.isArray(fetchedNodes) ? fetchedNodes : [];
 
-      setNodes(fetchedNodes);
+      setNodes(nodeArray);
       setInputUrl("");
+      await refreshSubscriptions();
 
-      // Перезапрашиваем актуальный список подписок
-      const rawSettings = await getSettings();
-      const settings = (rawSettings as any)?.result ?? rawSettings;
-      if (settings) {
-        setSubscriptions(settings.subscriptions || []);
-      }
-
-      const isFree = (
-        inputUrl.includes("igareck/vpn-configs-for-russia") ||
-        inputUrl.toLowerCase().includes("avencores/goida-vpn-configs") ||
-        inputUrl.includes("goida-vpn-configs") ||
-        inputUrl.includes("zieng2/wl")
-      );
-      const addedCount = fetchedNodes.filter((n: any) => n.subscription_url === inputUrl).length;
+      const isFree = isFreeSubscriptionUrl(inputUrl);
+      const addedCount = nodeArray.filter((n) => n.subscription_url === inputUrl).length;
       toaster.toast({
         title: t("success"),
-        body: isFree ? t("freeConfigsUpdated") : t("loadedNodesForSub", { count: addedCount })
+        body: isFree ? t("freeConfigsUpdated") : t("loadedNodesForSub", { count: addedCount }),
       });
     } catch (err) {
       toaster.toast({ title: t("error"), body: `${err}` });
@@ -554,15 +200,13 @@ function Content() {
     setLoading(true);
     try {
       const raw = await removeSubscription(urlToDelete);
-      const fetchedNodes: NodeConfig[] = Array.isArray(raw)
-        ? raw
-        : (raw as any)?.result ?? [];
+      const fetchedNodes = unwrap<NodeConfig[]>(raw) || [];
+      const nodeArray = Array.isArray(fetchedNodes) ? fetchedNodes : [];
 
-      setNodes(fetchedNodes);
+      setNodes(nodeArray);
 
-      // Проверяем, осталась ли выбранная нода в списке доступных
       if (selectedNode) {
-        const stillExists = fetchedNodes.some(
+        const stillExists = nodeArray.some(
           (n) => n.name === selectedNode.name && n.server === selectedNode.server
         );
         if (!stillExists) {
@@ -579,12 +223,7 @@ function Content() {
         }
       }
 
-      // Перезапрашиваем актуальный список подписок
-      const rawSettings = await getSettings();
-      const settings = (rawSettings as any)?.result ?? rawSettings;
-      if (settings) {
-        setSubscriptions(settings.subscriptions || []);
-      }
+      await refreshSubscriptions();
     } catch (err) {
       toaster.toast({ title: t("error"), body: `${err}` });
     } finally {
@@ -596,21 +235,16 @@ function Content() {
     setLoading(true);
     try {
       const raw = await updateSubscription(urlToUpdate);
-      const fetchedNodes: NodeConfig[] = Array.isArray(raw)
-        ? raw
-        : (raw as any)?.result ?? [];
+      const fetchedNodes = unwrap<NodeConfig[]>(raw) || [];
+      const nodeArray = Array.isArray(fetchedNodes) ? fetchedNodes : [];
 
-      setNodes(fetchedNodes);
-      const isFree = (
-        urlToUpdate.includes("igareck/vpn-configs-for-russia") ||
-        urlToUpdate.toLowerCase().includes("avencores/goida-vpn-configs") ||
-        urlToUpdate.includes("goida-vpn-configs") ||
-        urlToUpdate.includes("zieng2/wl")
-      );
-      const updatedCount = fetchedNodes.filter((n: any) => n.subscription_url === urlToUpdate).length;
+      setNodes(nodeArray);
+      const isFree = isFreeSubscriptionUrl(urlToUpdate);
+      const updatedCount = nodeArray.filter((n) => n.subscription_url === urlToUpdate).length;
+
       toaster.toast({
         title: t("success"),
-        body: isFree ? t("freeConfigsUpdated") : t("loadedNodesForSub", { count: updatedCount })
+        body: isFree ? t("freeConfigsUpdated") : t("loadedNodesForSub", { count: updatedCount }),
       });
     } catch (err) {
       toaster.toast({ title: t("error"), body: `${err}` });
@@ -623,7 +257,6 @@ function Content() {
     const isCurrentActive = selectedNode && selectedNode.name === node.name && connected;
 
     if (isCurrentActive) {
-      // Клик на уже подключенную ноду -> Отключаем
       setLoading(true);
       try {
         await disconnect();
@@ -635,9 +268,7 @@ function Content() {
         setLoading(false);
       }
     } else {
-      // Клик на новую ноду (или неподключенную) -> Подключаем
       if (connected) {
-        // Если уже было активно другое соединение, гасим его перед стартом нового
         setLoading(true);
         try {
           await disconnect();
@@ -652,7 +283,7 @@ function Content() {
 
       try {
         const rawSuccess = await connectNode(node);
-        const success = (rawSuccess as any)?.result ?? rawSuccess;
+        const success = unwrap<boolean>(rawSuccess);
         if (success) {
           setConnected(true);
           toaster.toast({ title: t("tunnelStarted"), body: t("tunnelStartedBody", { name: node.name }) });
@@ -673,7 +304,7 @@ function Content() {
     setLoading(true);
     try {
       const raw = await exportLogs();
-      const text = (raw as any)?.result ?? raw;
+      const text = unwrap<string>(raw);
       if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
         try {
           await navigator.clipboard.writeText(text);
@@ -683,7 +314,7 @@ function Content() {
       }
       toaster.toast({
         title: t("logCreatedTitle"),
-        body: t("logCreated")
+        body: t("logCreated"),
       });
     } catch (err) {
       toaster.toast({ title: t("error"), body: `${err}` });
@@ -693,57 +324,18 @@ function Content() {
   };
 
   const handlePasteFromClipboard = async () => {
-    let pastedText = "";
-
-    // 1. Системно читаем буфер обмена Steam Deck (X11 / Gamescope в Игровом режиме и Klipper в Desktop Mode)
-    try {
-      const rawBackendText = await getClipboard();
-      const backendText = (rawBackendText as any)?.result ?? rawBackendText;
-      if (backendText && typeof backendText === "string" && backendText.trim()) {
-        pastedText = backendText.trim();
-      }
-    } catch (backendErr) {
-      console.warn("Backend system clipboard read error:", backendErr);
-    }
-
-    // 2. Пробуем нативный Steam Client JS API
-    if (!pastedText) {
-      try {
-        if ((window as any).SteamClient?.System?.GetClipboardText) {
-          const text = await (window as any).SteamClient.System.GetClipboardText();
-          if (text && typeof text === "string" && text.trim()) {
-            pastedText = text.trim();
-          }
-        }
-      } catch (steamErr) {
-        console.warn("SteamClient.System.GetClipboardText error:", steamErr);
-      }
-    }
-
-    // 3. Пробуем стандартный браузерный API
-    if (!pastedText) {
-      try {
-        if (navigator.clipboard && typeof navigator.clipboard.readText === "function") {
-          const text = await navigator.clipboard.readText();
-          if (text && text.trim()) {
-            pastedText = text.trim();
-          }
-        }
-      } catch (clipErr) {
-        console.warn("Browser clipboard read error:", clipErr);
-      }
-    }
+    const pastedText = await readClipboardText(getClipboard);
 
     if (pastedText) {
       setInputUrl(pastedText);
       toaster.toast({
         title: t("success"),
-        body: t("pastedFromClipboard")
+        body: t("pastedFromClipboard"),
       });
     } else {
       toaster.toast({
         title: t("toastWarning"),
-        body: t("clipboardEmptyOrBlocked")
+        body: t("clipboardEmptyOrBlocked"),
       });
     }
   };
@@ -770,7 +362,6 @@ function Content() {
 
         {presetExpanded && (
           <>
-            {/* Опция Default */}
             <PanelSectionRow>
               <div style={{ position: "relative", width: "100%" }}>
                 <ButtonItem
@@ -797,7 +388,6 @@ function Content() {
               </div>
             </PanelSectionRow>
 
-            {/* Опция RoscomVPN */}
             <PanelSectionRow>
               <div style={{ position: "relative", width: "100%" }}>
                 <ButtonItem
@@ -827,50 +417,9 @@ function Content() {
         )}
       </PanelSection>
 
-      <style>{`
-        .paste-btn-clean {
-          width: 38px !important;
-          height: 38px !important;
-          min-width: 38px !important;
-          max-width: 38px !important;
-          padding: 0 !important;
-          margin: 0 !important;
-          display: flex !important;
-          align-items: center !important;
-          justify-content: center !important;
-          border-radius: 0px !important;
-          border: none !important;
-          outline: none !important;
-          box-shadow: none !important;
-          background: rgba(255, 255, 255, 0.08) !important;
-          color: #ffffff !important;
-          cursor: pointer !important;
-          transition: background-color 0.15s ease, color 0.15s ease !important;
-        }
-        .paste-btn-clean svg {
-          fill: #ffffff !important;
-          color: #ffffff !important;
-          transition: fill 0.15s ease, color 0.15s ease !important;
-        }
-        .paste-btn-clean:focus,
-        .paste-btn-clean:hover,
-        .paste-btn-clean:active,
-        .paste-btn-clean:focus-within {
-          background: #ffffff !important;
-          color: #1a1f24 !important;
-          border: none !important;
-          outline: none !important;
-          box-shadow: none !important;
-          border-radius: 0px !important;
-        }
-        .paste-btn-clean:focus svg,
-        .paste-btn-clean:hover svg,
-        .paste-btn-clean:active svg,
-        .paste-btn-clean:focus-within svg {
-          fill: #1a1f24 !important;
-          color: #1a1f24 !important;
-        }
-      `}</style>
+      <style>{PASTE_BUTTON_CSS}</style>
+
+      {/* Поле ввода URL подписки */}
       <PanelSectionRow>
         <div style={{ display: "flex", flexDirection: "column", width: "100%" }}>
           <div style={{ fontSize: "11px", fontWeight: "bold", color: "#a5a5a5", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "6px" }}>
@@ -893,7 +442,7 @@ function Content() {
           </div>
         </div>
       </PanelSectionRow>
-      
+
       <PanelSectionRow>
         <ButtonItem
           layout="below"
@@ -903,6 +452,7 @@ function Content() {
           {loading ? t("updating") : t("addSubBtn")}
         </ButtonItem>
       </PanelSectionRow>
+
       <PanelSectionRow>
         <ButtonItem
           layout="below"
@@ -919,6 +469,7 @@ function Content() {
           {t("subscriptionsTitle")}
         </span>
       </div>
+
       <PanelSection>
         {subscriptions.length === 0 ? (
           <PanelSectionRow>
@@ -926,23 +477,21 @@ function Content() {
           </PanelSectionRow>
         ) : (
           subscriptions.map((url, idx) => {
-            const subNodes = nodes.filter(n => n.subscription_url === url);
-            const isFreeConfigs = (
-              url.includes("igareck/vpn-configs-for-russia") ||
-              url.toLowerCase().includes("avencores/goida-vpn-configs") ||
-              url.includes("goida-vpn-configs") ||
-              url.includes("zieng2/wl")
-            );
+            const subNodes = nodesBySubscription[url] || [];
+            const isFreeConfigs = isFreeSubscriptionUrl(url);
             const domainLabel = getDomainLabel(url, lang);
-            const isExpanded = expandedSubs[url] !== undefined ? expandedSubs[url] : (connected && selectedNode?.subscription_url === url);
-            
+            const isExpanded =
+              expandedSubs[url] !== undefined
+                ? expandedSubs[url]
+                : connected && selectedNode?.subscription_url === url;
+
             return (
               <PanelSection key={idx}>
                 {/* Заголовок подписки в виде кнопки раскрытия */}
                 <PanelSectionRow>
                   <ButtonItem
                     layout="below"
-                    onClick={() => setExpandedSubs(prev => ({ ...prev, [url]: !prev[url] }))}
+                    onClick={() => setExpandedSubs((prev) => ({ ...prev, [url]: !prev[url] }))}
                   >
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
                       <span style={{ fontSize: "11px", fontWeight: "bold", color: "#a5a5a5", textTransform: "uppercase", letterSpacing: "0.5px" }}>
@@ -1007,7 +556,7 @@ function Content() {
                       </PanelSectionRow>
                     )}
 
-                    {/* Статус подключенного сервера внутри конкретной подписки */}
+                    {/* Статус подключенного сервера */}
                     {connected && selectedNode && selectedNode.subscription_url === url && (
                       <PanelSectionRow>
                         <div style={{ color: "#1a9fff", fontWeight: "bold", padding: "4px 0", fontSize: "12px" }}>
@@ -1015,8 +564,8 @@ function Content() {
                         </div>
                       </PanelSectionRow>
                     )}
-                    
-                    {/* Кнопки управления подпиской столбиком (Обновить НАД Удалить) */}
+
+                    {/* Кнопка Обновить */}
                     {!isFreeConfigs && (
                       <PanelSectionRow>
                         <ButtonItem
@@ -1028,6 +577,8 @@ function Content() {
                         </ButtonItem>
                       </PanelSectionRow>
                     )}
+
+                    {/* Кнопка Удалить */}
                     <PanelSectionRow>
                       <div style={{ color: "#ff6347" }}>
                         <ButtonItem
@@ -1047,7 +598,7 @@ function Content() {
         )}
       </PanelSection>
 
-      {/* Кнопка LOG перемещена в самый низ */}
+      {/* Кнопка экспорта логов */}
       <PanelSectionRow>
         <ButtonItem
           layout="below"
@@ -1064,9 +615,9 @@ function Content() {
           layout="below"
           onClick={() => {
             if (Navigation?.NavigateToExternalWeb) {
-              Navigation.NavigateToExternalWeb("https://vk.ru/valvesteamdeck");
+              Navigation.NavigateToExternalWeb(SUPPORT_COMMUNITY_URL);
             } else {
-              window.open("https://vk.ru/valvesteamdeck", "_blank");
+              window.open(SUPPORT_COMMUNITY_URL, "_blank");
             }
           }}
         >
@@ -1083,8 +634,6 @@ export default definePlugin(() => {
     titleView: <div className={staticClasses.Title}>SUB Deck</div>,
     content: <Content />,
     icon: <FaNetworkWired />,
-    onDismount() {
-      // Здесь можно вызвать деинициализацию при необходимости
-    },
+    onDismount() {},
   };
 });
