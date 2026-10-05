@@ -21,7 +21,7 @@
 
 يتضمن المكون الإضافي زر **"اشتراكات مجانية"** يضيف ثلاثة مصادر تم التحقق منها مسبقًا ويتم تحديثها تلقائيًا:
 - [اشتراك igareck](https://github.com/igareck/vpn-configs-for-russia): مصدر التكوين الكلاسيكي المعتمد لتجاوز الحجب في روسيا.
-- [Goida VPN (AvenCores)](https://github.com/AvenCores/goida-vpn-configs): تكوينات VLESS المحدثة بشكل متكرر من مشروع Goida VPN.
+- [Goida VPN (AvenCores)](https://gitlab.com/avencores/goida-vpn-configs): تكوينات VLESS المحدثة بشكل متكرر من مشروع Goida VPN.
 - [اشتراك zieng2/wl](https://github.com/zieng2/wl): تكوينات VLESS العالمية عالية الجودة من مستودع zieng2 wl.
 
 *ملاحظة: لضمان الأداء والسرعة، يتم تصفية الاشتراكات المجانية تلقائيًا لعرض أسرع 5 عقد فقط بناءً على اختبار Ping متوازي عبر بروتوكول TCP.*

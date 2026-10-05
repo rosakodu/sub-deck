@@ -81,7 +81,7 @@ class Plugin:
     async def add_free_subscriptions(self) -> list:
         urls = [
             "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/Vless-Reality-White-Lists-Rus-Mobile.txt",
-            "https://raw.githubusercontent.com/AvenCores/goida-vpn-configs/main/githubmirror/1.txt",
+            "https://gitlab.com/avencores/goida-vpn-configs/-/raw/main/githubmirror/1.txt",
             "https://raw.githubusercontent.com/zieng2/wl/main/vless_universal.txt"
         ]
         nodes = await self.loop.run_in_executor(

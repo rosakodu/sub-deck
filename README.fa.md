@@ -21,7 +21,7 @@
 
 این پلاگین شامل یک دکمه **«اشتراک‌های رایگان»** است که سه منبع معتبر و به‌روزرسانی‌شده خودکار را اضافه می‌کند:
 - [اشتراک igareck](https://github.com/igareck/vpn-configs-for-russia): منبع پیکربندی کلاسیک و تایید شده برای دور زدن فیلترینگ در روسیه.
-- [Goida VPN (AvenCores)](https://github.com/AvenCores/goida-vpn-configs): پیکربندی‌های VLESS به‌روزرسانی شده مکرر از پروژه Goida VPN.
+- [Goida VPN (AvenCores)](https://gitlab.com/avencores/goida-vpn-configs): پیکربندی‌های VLESS به‌روزرسانی شده مکرر از پروژه Goida VPN.
 - [اشتراک zieng2/wl](https://github.com/zieng2/wl): پیکربندی‌های عمومی VLESS با کیفیت بالا از مخزن zieng2 wl.
 
 *توجه: برای کارایی و سرعت بیشتر، اشتراک‌های رایگان به طور خودکار فیلتر می‌شوند تا فقط ۵ گره سریع‌تر بر اساس پینگ موازی TCP نمایش داده شوند.*

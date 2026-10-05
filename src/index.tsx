@@ -367,7 +367,7 @@ function getDomainLabel(url: string, lang: string): string {
     if (lang === "turkish") return "igareck Aboneliği";
     return "igareck Subscription";
   }
-  if (url.includes("AvenCores/goida-vpn-configs")) {
+  if (url.toLowerCase().includes("avencores/goida-vpn-configs") || url.includes("goida-vpn-configs")) {
     if (lang === "russian") return "Подписка Goida VPN AvenCores";
     if (lang === "schinese") return "Goida VPN AvenCores 订阅";
     if (lang === "tchinese") return "Goida VPN AvenCores 訂閱";
@@ -534,7 +534,8 @@ function Content() {
 
       const isFree = (
         inputUrl.includes("igareck/vpn-configs-for-russia") ||
-        inputUrl.includes("AvenCores/goida-vpn-configs") ||
+        inputUrl.toLowerCase().includes("avencores/goida-vpn-configs") ||
+        inputUrl.includes("goida-vpn-configs") ||
         inputUrl.includes("zieng2/wl")
       );
       const addedCount = fetchedNodes.filter((n: any) => n.subscription_url === inputUrl).length;
@@ -602,7 +603,8 @@ function Content() {
       setNodes(fetchedNodes);
       const isFree = (
         urlToUpdate.includes("igareck/vpn-configs-for-russia") ||
-        urlToUpdate.includes("AvenCores/goida-vpn-configs") ||
+        urlToUpdate.toLowerCase().includes("avencores/goida-vpn-configs") ||
+        urlToUpdate.includes("goida-vpn-configs") ||
         urlToUpdate.includes("zieng2/wl")
       );
       const updatedCount = fetchedNodes.filter((n: any) => n.subscription_url === urlToUpdate).length;
@@ -927,7 +929,8 @@ function Content() {
             const subNodes = nodes.filter(n => n.subscription_url === url);
             const isFreeConfigs = (
               url.includes("igareck/vpn-configs-for-russia") ||
-              url.includes("AvenCores/goida-vpn-configs") ||
+              url.toLowerCase().includes("avencores/goida-vpn-configs") ||
+              url.includes("goida-vpn-configs") ||
               url.includes("zieng2/wl")
             );
             const domainLabel = getDomainLabel(url, lang);

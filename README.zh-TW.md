@@ -21,7 +21,7 @@ Steam Deck 的 Decky Loader 外掛程式，讓您能夠管理 VLESS、VMess、Tr
 
 插件包含一個**「免費訂閱」**按鈕，可一鍵添加三個經過預先驗證且自動更新的源：
 - [igareck 訂閱](https://github.com/igareck/vpn-configs-for-russia)：經典的、經過驗證的俄羅斯繞過屏蔽的配置源。
-- [Goida VPN (AvenCores)](https://github.com/AvenCores/goida-vpn-configs)：來自 Goida VPN 項目且頻繁更新的 VLESS 配置。
+- [Goida VPN (AvenCores)](https://gitlab.com/avencores/goida-vpn-configs)：來自 Goida VPN 項目且頻繁更新的 VLESS 配置。
 - [zieng2/wl 訂閱](https://github.com/zieng2/wl)：來自 zieng2 wl 倉庫的高質量通用 VLESS 配置。
 
 *注意：為了提高性能和連線速度，免費訂閱將自動進行並行 TCP Ping 延遲測試，且僅保留並顯示前 5 個最快的節點。*
