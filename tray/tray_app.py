@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 """
 Sub-Deck Desktop Tray Companion.
-Provides a streamlined, always-in-tray system popup menu for managing
+Provides a streamlined, native StatusNotifierItem system tray popup for managing
 VPN connections, servers, subscriptions, and presets without opening Steam Big Picture.
+Fully compatible with KDE Plasma Wayland (Steam Deck Desktop Mode), supporting
+identical native context menus on BOTH Left-Click and Right-Click.
 """
 
 import sys
 import os
 import time
 import threading
-from typing import Optional, Dict, List, Any
+import re
+from typing import Optional, Dict, List, Any, Callable
 
 # Ensure plugin root directory is on sys.path
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -21,28 +24,31 @@ try:
     from PyQt6.QtCore import Qt, QTimer, QPoint, pyqtSignal, QObject
     from PyQt6.QtGui import (
         QIcon, QPixmap, QPainter, QColor, QFont, QAction, QCursor, QBrush, QPen,
-        QPainterPath
+        QPainterPath, QImage
     )
     from PyQt6.QtWidgets import (
-        QApplication, QSystemTrayIcon, QMenu
+        QApplication, QInputDialog
     )
 except ImportError:
     try:
         from PySide6.QtCore import Qt, QTimer, QPoint, Signal as pyqtSignal, QObject
         from PySide6.QtGui import (
             QIcon, QPixmap, QPainter, QColor, QFont, QAction, QCursor, QBrush, QPen,
-            QPainterPath
+            QPainterPath, QImage
         )
         from PySide6.QtWidgets import (
-            QApplication, QSystemTrayIcon, QMenu
+            QApplication, QInputDialog
         )
     except ImportError:
         print("Error: Neither PyQt6 nor PySide6 is installed.")
         print("Please install python-pyqt6 (e.g.: sudo pacman -S python-pyqt6)")
         sys.exit(1)
 
+import dbus
+import dbus.service
+import dbus.mainloop.pyqt6
+
 from tray.api_client import SubDeckApiClient
-from tray.desktop_integration import ensure_desktop_entry
 from core.constants import PRESET_DEFAULT, PRESET_ROSCOMVPN, SUPPORTED_SCHEMES
 from core.system import read_system_clipboard
 
@@ -74,6 +80,8 @@ STRINGS = {
         "notify_ping_results": "Результаты пинга:",
         "no_servers": "Нет доступных серверов",
         "no_subscriptions": "Нет добавленных подписок",
+        "dialog_add_sub_title": "Добавить подписку",
+        "dialog_add_sub_msg": "Введите или вставьте URL подписки:",
     },
     "en": {
         "app_title": "Sub-Deck VPN",
@@ -97,6 +105,8 @@ STRINGS = {
         "notify_ping_results": "Ping Results:",
         "no_servers": "No available servers",
         "no_subscriptions": "No subscriptions added",
+        "dialog_add_sub_title": "Add Subscription",
+        "dialog_add_sub_msg": "Enter or paste subscription URL:",
     }
 }
 
@@ -115,7 +125,7 @@ def tr(key: str, **kwargs) -> str:
 
 
 # ─────────────────────────────────────────────────────────────
-# Dynamic Tray Icon Generator
+# Dynamic Tray Icon Generator & Pixmap Formatter
 # ─────────────────────────────────────────────────────────────
 
 def create_tray_pixmap(status: str = "disconnected", size: int = 64) -> QPixmap:
@@ -182,34 +192,146 @@ def create_tray_pixmap(status: str = "disconnected", size: int = 64) -> QPixmap:
     return pixmap
 
 
-MENU_STYLESHEET = """
-QMenu {
-    background-color: #1a1f29;
-    color: #f1f5f9;
-    border: 1px solid #2e384d;
-    border-radius: 8px;
-    padding: 6px;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Ubuntu, sans-serif;
-    font-size: 13px;
-}
-QMenu::item {
-    padding: 8px 24px 8px 12px;
-    border-radius: 6px;
-}
-QMenu::item:selected {
-    background-color: #2a3447;
-    color: #38bdf8;
-}
-QMenu::item:disabled {
-    color: #94a3b8;
-    font-weight: bold;
-}
-QMenu::separator {
-    height: 1px;
-    background-color: #2e384d;
-    margin: 5px 8px;
-}
-"""
+def pixmap_to_sni_pixmap(pixmap: QPixmap) -> dbus.Struct:
+    """Converts a QPixmap to org.kde.StatusNotifierItem IconPixmap ARGB32 network struct."""
+    image = pixmap.toImage().convertToFormat(QImage.Format.Format_ARGB32)
+    w, h = image.width(), image.height()
+    raw = bytearray()
+    for y in range(h):
+        for x in range(w):
+            p = image.pixel(x, y)
+            raw.extend([(p >> 24) & 0xFF, (p >> 16) & 0xFF, (p >> 8) & 0xFF, p & 0xFF])
+    return dbus.Struct((dbus.Int32(w), dbus.Int32(h), dbus.ByteArray(raw)))
+
+
+# ─────────────────────────────────────────────────────────────
+# StatusNotifierItem & DBusMenu Adaptors
+# ─────────────────────────────────────────────────────────────
+
+class SubDeckSNI(dbus.service.Object):
+    """
+    Standard org.kde.StatusNotifierItem implementation.
+    Crucially exports 'ItemIsMenu: True' which forces KDE Plasma to treat both
+    Left-Click (ЛКМ) and Right-Click (ПКМ) as context menu requests.
+    """
+
+    def __init__(self, conn, path, tray_app):
+        super().__init__(conn, path)
+        self.tray_app = tray_app
+
+    @dbus.service.method('org.freedesktop.DBus.Properties', in_signature='ss', out_signature='v')
+    def Get(self, iface, prop):
+        return self.GetAll(iface).get(prop, '')
+
+    @dbus.service.method('org.freedesktop.DBus.Properties', in_signature='s', out_signature='a{sv}')
+    def GetAll(self, iface):
+        if iface == 'org.kde.StatusNotifierItem':
+            icon_struct = pixmap_to_sni_pixmap(self.tray_app.current_icon_pixmap)
+            return {
+                'Category': dbus.String('ApplicationStatus'),
+                'Id': dbus.String('sub-deck'),
+                'Title': dbus.String(self.tray_app.current_title),
+                'Status': dbus.String('Active'),
+                'ItemIsMenu': dbus.Boolean(True),
+                'IconName': dbus.String(''),
+                'IconPixmap': dbus.Array([icon_struct], signature='(iiay)'),
+                'OverlayIconPixmap': dbus.Array([], signature='(iiay)'),
+                'AttentionIconPixmap': dbus.Array([], signature='(iiay)'),
+                'AttentionIconName': dbus.String(''),
+                'AttentionMovieName': dbus.String(''),
+                'OverlayIconName': dbus.String(''),
+                'IconThemePath': dbus.String(''),
+                'WindowId': dbus.Int32(0),
+                'Menu': dbus.ObjectPath('/MenuBar'),
+                'ToolTip': dbus.Struct((
+                    dbus.String(''),
+                    dbus.Array([], signature='(iiay)'),
+                    dbus.String(self.tray_app.current_tooltip),
+                    dbus.String('')
+                )),
+            }
+        return {}
+
+    @dbus.service.method('org.kde.StatusNotifierItem', in_signature='ii')
+    def Activate(self, x, y):
+        pass
+
+    @dbus.service.method('org.kde.StatusNotifierItem', in_signature='ii')
+    def ContextMenu(self, x, y):
+        pass
+
+    @dbus.service.method('org.kde.StatusNotifierItem', in_signature='ii')
+    def SecondaryActivate(self, x, y):
+        pass
+
+    @dbus.service.method('org.kde.StatusNotifierItem', in_signature='is')
+    def Scroll(self, delta, dir):
+        pass
+
+    @dbus.service.method('org.kde.StatusNotifierItem', in_signature='s')
+    def ProvideXdgActivationToken(self, token):
+        pass
+
+    @dbus.service.signal('org.kde.StatusNotifierItem')
+    def NewTitle(self):
+        pass
+
+    @dbus.service.signal('org.kde.StatusNotifierItem')
+    def NewIcon(self):
+        pass
+
+    @dbus.service.signal('org.kde.StatusNotifierItem')
+    def NewToolTip(self):
+        pass
+
+    @dbus.service.signal('org.kde.StatusNotifierItem')
+    def NewStatus(self, status):
+        pass
+
+    @dbus.service.signal('org.kde.StatusNotifierItem')
+    def NewMenu(self):
+        pass
+
+
+class SubDeckDBusMenu(dbus.service.Object):
+    """
+    Standard com.canonical.dbusmenu implementation.
+    Delivers dynamic menu hierarchies and click events directly to KDE Plasma.
+    """
+
+    def __init__(self, conn, path, tray_app):
+        super().__init__(conn, path)
+        self.tray_app = tray_app
+        self.revision = dbus.UInt32(1)
+
+    @dbus.service.method('com.canonical.dbusmenu', in_signature='i', out_signature='b')
+    def AboutToShow(self, id):
+        return True
+
+    @dbus.service.method('com.canonical.dbusmenu', in_signature='iias', out_signature='u(ia{sv}av)')
+    def GetLayout(self, parent_id, recursion_depth, property_names):
+        return self.tray_app.get_menu_layout(parent_id, recursion_depth)
+
+    @dbus.service.method('com.canonical.dbusmenu', in_signature='isvu', out_signature='')
+    def Event(self, id, eventId, data, timestamp):
+        if eventId == 'clicked':
+            self.tray_app.trigger_menu_action(id)
+
+    @dbus.service.method('com.canonical.dbusmenu', in_signature='aias', out_signature='a(ia{sv})')
+    def GetGroupProperties(self, ids, propertyNames):
+        return dbus.Array([], signature=dbus.Signature('(ia{sv})'))
+
+    @dbus.service.method('com.canonical.dbusmenu', in_signature='is', out_signature='v')
+    def GetProperty(self, id, property):
+        return dbus.String('')
+
+    @dbus.service.signal('com.canonical.dbusmenu', signature='ui')
+    def LayoutUpdated(self, revision, parentId):
+        pass
+
+    def bump_layout(self):
+        self.revision = dbus.UInt32(int(self.revision) + 1)
+        self.LayoutUpdated(self.revision, dbus.Int32(0))
 
 
 # ─────────────────────────────────────────────────────────────
@@ -227,7 +349,7 @@ class StateBridge(QObject):
 # ─────────────────────────────────────────────────────────────
 
 class SubDeckTrayApp(QObject):
-    """Main System Tray controller managing icon and pop-up menu."""
+    """Main System Tray controller managing SNI, DBusMenu, state and polling."""
 
     def __init__(self, app: QApplication):
         super().__init__()
@@ -241,53 +363,36 @@ class SubDeckTrayApp(QObject):
         self.status: Optional[Dict[str, Any]] = None
         self.ping_map: Dict[str, int] = {}
 
+        # Display properties
+        self.current_title = tr("app_title")
+        self.current_tooltip = f"{tr('app_title')} - {tr('status_disconnected')}"
+        self.current_icon_pixmap = create_tray_pixmap("disconnected", 48)
+
+        # Action registry: ID -> callback
+        self.action_callbacks: Dict[int, Callable[[], None]] = {}
+        self.next_action_id = 100
+
+        # Submenu roots: parent_id -> list of child Structs
+        self.menu_children_map: Dict[int, List[dbus.Struct]] = {}
+        self.root_items: List[dbus.Struct] = []
+
         # Connect signals
         self.bridge.state_updated.connect(self._apply_state)
         self.bridge.ping_completed.connect(self._apply_ping_results)
-        self.bridge.show_notification.connect(self._on_notification)
+        self.bridge.show_notification.connect(self._send_desktop_notification)
 
-        # Build menu
-        self.menu = QMenu()
-        self.menu.setStyleSheet(MENU_STYLESHEET)
+        # Setup DBus
+        self.session_bus = dbus.SessionBus()
+        self.sni = SubDeckSNI(self.session_bus, '/StatusNotifierItem', self)
+        self.dbusmenu = SubDeckDBusMenu(self.session_bus, '/MenuBar', self)
 
-        # Status item (always top)
-        self.status_action = QAction(f"○ {tr('status_disconnected')}", self)
-        self.status_action.setEnabled(False)
-        self.menu.addAction(self.status_action)
-        self.menu.addSeparator()
-
-        # Disconnect Action (shown only when connected)
-        self.disconnect_action = QAction(tr("action_disconnect"), self)
-        self.disconnect_action.triggered.connect(self._disconnect_vpn)
-        self.disconnect_action.setVisible(False)
-        self.menu.addAction(self.disconnect_action)
-        self.disconnect_separator = self.menu.addSeparator()
-        self.disconnect_separator.setVisible(False)
-
-        # "Select Server" Submenu (all connections start here)
-        self.servers_menu = self.menu.addMenu(tr("menu_select_server"))
-
-        # Subscriptions Submenu
-        self.subscriptions_menu = self.menu.addMenu(tr("menu_subscriptions"))
-
-        # Presets Submenu
-        self.preset_menu = self.menu.addMenu(tr("menu_preset"))
-        self.action_preset_def = QAction(tr("preset_default"), self)
-        self.action_preset_def.triggered.connect(lambda: self._set_preset(PRESET_DEFAULT))
-        self.action_preset_ros = QAction(tr("preset_roscomvpn"), self)
-        self.action_preset_ros.triggered.connect(lambda: self._set_preset(PRESET_ROSCOMVPN))
-        self.preset_menu.addAction(self.action_preset_def)
-        self.preset_menu.addAction(self.action_preset_ros)
-
-        # Create tray icon
-        self.tray = QSystemTrayIcon(self)
-        self._update_tray_icon("disconnected")
-        self.tray.setToolTip(f"{tr('app_title')} - {tr('status_disconnected')}")
-        self.tray.setContextMenu(self.menu)
-
-        # Open menu on BOTH left click and right click!
-        self.tray.activated.connect(self._on_tray_activated)
-        self.tray.show()
+        # Register with KDE Plasma StatusNotifierWatcher
+        try:
+            watcher = self.session_bus.get_object('org.kde.StatusNotifierWatcher', '/StatusNotifierWatcher')
+            watcher_iface = dbus.Interface(watcher, 'org.kde.StatusNotifierWatcher')
+            watcher_iface.RegisterStatusNotifierItem(self.session_bus.get_unique_name())
+        except Exception as e:
+            print(f"[SubDeckTray] StatusNotifierWatcher registration warning: {e}")
 
         # Background polling timer (every 2.5s)
         self.timer = QTimer(self)
@@ -297,17 +402,14 @@ class SubDeckTrayApp(QObject):
         # Initial poll
         self._poll_status_background()
 
-    def _update_tray_icon(self, status: str):
-        pixmap = create_tray_pixmap(status, size=64)
-        self.tray.setIcon(QIcon(pixmap))
-
-    def _on_tray_activated(self, reason: QSystemTrayIcon.ActivationReason):
-        """Pops up the menu on left, right, or double click."""
-        pos = QCursor.pos()
-        self.menu.popup(pos)
-
-    def _on_notification(self, title: str, message: str):
-        self.tray.showMessage(title, message, QSystemTrayIcon.MessageIcon.Information, 5000)
+    def _send_desktop_notification(self, title: str, message: str, timeout_ms: int = 4000):
+        """Sends native desktop notification via org.freedesktop.Notifications."""
+        try:
+            notify_obj = self.session_bus.get_object('org.freedesktop.Notifications', '/org/freedesktop/Notifications')
+            notify_iface = dbus.Interface(notify_obj, 'org.freedesktop.Notifications')
+            notify_iface.Notify('Sub-Deck VPN', 0, '', title, message, [], {}, timeout_ms)
+        except Exception:
+            pass
 
     def _poll_status_background(self):
         """Runs in separate thread and emits result via Qt Signal."""
@@ -315,23 +417,66 @@ class SubDeckTrayApp(QObject):
             status = self.client.get_status()
             nodes = self.client.get_nodes() if status else []
             settings = self.client.get_settings() if status else {}
-            # Thread-safe dispatch to GUI thread
             self.bridge.state_updated.emit(status, nodes, settings)
 
         threading.Thread(target=_worker, daemon=True).start()
 
+    def _register_action(self, callback: Callable[[], None]) -> int:
+        aid = self.next_action_id
+        self.next_action_id += 1
+        self.action_callbacks[aid] = callback
+        return aid
+
+    def trigger_menu_action(self, action_id: int):
+        cb = self.action_callbacks.get(action_id)
+        if cb:
+            cb()
+
+    def get_menu_layout(self, parent_id: int, recursion_depth: int) -> tuple:
+        """Returns the DBusMenu hierarchy according to com.canonical.dbusmenu spec."""
+        parent_id_int = int(parent_id)
+        if parent_id_int == 0:
+            root_props = dbus.Dictionary({
+                dbus.String('children-display'): dbus.String('submenu')
+            }, signature=dbus.Signature('sv'))
+            children = dbus.Array(self.root_items, signature=dbus.Signature('v'))
+            root = dbus.Struct((dbus.Int32(0), root_props, children))
+            return (self.dbusmenu.revision, root)
+
+        sub_children = self.menu_children_map.get(parent_id_int, [])
+        sub_props = dbus.Dictionary({
+            dbus.String('children-display'): dbus.String('submenu')
+        }, signature=dbus.Signature('sv'))
+        sub_root = dbus.Struct((dbus.Int32(parent_id_int), sub_props, dbus.Array(sub_children, signature=dbus.Signature('v'))))
+        return (self.dbusmenu.revision, sub_root)
+
     def _apply_state(self, status: Optional[Dict[str, Any]], nodes: List[Dict[str, Any]], settings: Dict[str, Any]):
-        """Slot executed strictly on GUI thread."""
+        """Slot executed strictly on GUI thread. Builds menu hierarchy and updates icon."""
         self.status = status
         self.nodes = nodes
         self.settings = settings
 
+        self.action_callbacks.clear()
+        self.menu_children_map.clear()
+        self.next_action_id = 100
+
         if not status:
-            self._update_tray_icon("offline")
-            self.tray.setToolTip(f"{tr('app_title')} - {tr('status_offline')}")
-            self.status_action.setText(f"🔴 {tr('status_offline')}")
-            self.disconnect_action.setVisible(False)
-            self.disconnect_separator.setVisible(False)
+            self.current_icon_pixmap = create_tray_pixmap("offline", 48)
+            self.current_tooltip = f"{tr('app_title')} - {tr('status_offline')}"
+            self.sni.NewIcon()
+            self.sni.NewToolTip()
+
+            status_item = dbus.Struct((
+                dbus.Int32(1),
+                dbus.Dictionary({
+                    dbus.String('label'): dbus.String(f"🔴 {tr('status_offline')}"),
+                    dbus.String('enabled'): dbus.Boolean(False),
+                    dbus.String('visible'): dbus.Boolean(True),
+                }, signature=dbus.Signature('sv')),
+                dbus.Array([], signature=dbus.Signature('v'))
+            ))
+            self.root_items = [status_item]
+            self.dbusmenu.bump_layout()
             return
 
         is_running = bool(status.get("running"))
@@ -341,50 +486,110 @@ class SubDeckTrayApp(QObject):
         # Notification on state transition
         if self.last_connected_state is not None and self.last_connected_state != is_running:
             if is_running:
-                self.tray.showMessage(
+                self._send_desktop_notification(
                     tr("app_title"),
                     tr("notify_connected", node=node_name or "VPN"),
-                    QSystemTrayIcon.MessageIcon.Information,
                     2500
                 )
             else:
-                self.tray.showMessage(
+                self._send_desktop_notification(
                     tr("app_title"),
                     tr("notify_disconnected"),
-                    QSystemTrayIcon.MessageIcon.Information,
                     2000
                 )
         self.last_connected_state = is_running
 
+        # Icon & Tooltip
         if is_running:
-            self._update_tray_icon("connected")
-            tip = f"{tr('app_title')} - {tr('status_connected', name=node_name or 'Active')}"
-            self.tray.setToolTip(tip)
-            self.status_action.setText(f"🟢 {tr('status_connected', name=node_name[:26])}")
-            # Show disconnect button when connected
-            self.disconnect_action.setVisible(True)
-            self.disconnect_separator.setVisible(True)
+            self.current_icon_pixmap = create_tray_pixmap("connected", 48)
+            self.current_tooltip = f"{tr('app_title')} - {tr('status_connected', name=node_name or 'Active')}"
+            status_label = f"🟢 {tr('status_connected', name=node_name[:26])}"
         else:
-            self._update_tray_icon("disconnected")
-            self.tray.setToolTip(f"{tr('app_title')} - {tr('status_disconnected')}")
-            self.status_action.setText(f"⚪ {tr('status_disconnected')}")
-            # Hide disconnect button when disconnected (user connects via "Select Server")
-            self.disconnect_action.setVisible(False)
-            self.disconnect_separator.setVisible(False)
+            self.current_icon_pixmap = create_tray_pixmap("disconnected", 48)
+            self.current_tooltip = f"{tr('app_title')} - {tr('status_disconnected')}"
+            status_label = f"⚪ {tr('status_disconnected')}"
 
-        # ── Rebuild "Select Server" Submenu ──
-        self.servers_menu.clear()
+        self.sni.NewIcon()
+        self.sni.NewToolTip()
 
-        # Ping action at top of servers menu
-        ping_act = QAction(tr("btn_check_ping"), self)
-        ping_act.triggered.connect(self._run_ping_check)
-        self.servers_menu.addAction(ping_act)
-        self.servers_menu.addSeparator()
+        new_root_items: List[dbus.Struct] = []
+
+        # 1. Top status item (disabled)
+        new_root_items.append(dbus.Struct((
+            dbus.Int32(1),
+            dbus.Dictionary({
+                dbus.String('label'): dbus.String(status_label),
+                dbus.String('enabled'): dbus.Boolean(False),
+                dbus.String('visible'): dbus.Boolean(True),
+            }, signature=dbus.Signature('sv')),
+            dbus.Array([], signature=dbus.Signature('v'))
+        )))
+
+        # Separator
+        new_root_items.append(dbus.Struct((
+            dbus.Int32(2),
+            dbus.Dictionary({
+                dbus.String('type'): dbus.String('separator'),
+                dbus.String('visible'): dbus.Boolean(True),
+            }, signature=dbus.Signature('sv')),
+            dbus.Array([], signature=dbus.Signature('v'))
+        )))
+
+        # 2. Disconnect Action (visible only when connected)
+        if is_running:
+            disconn_id = self._register_action(self._disconnect_vpn)
+            new_root_items.append(dbus.Struct((
+                dbus.Int32(disconn_id),
+                dbus.Dictionary({
+                    dbus.String('label'): dbus.String(tr("action_disconnect")),
+                    dbus.String('enabled'): dbus.Boolean(True),
+                    dbus.String('visible'): dbus.Boolean(True),
+                }, signature=dbus.Signature('sv')),
+                dbus.Array([], signature=dbus.Signature('v'))
+            )))
+            new_root_items.append(dbus.Struct((
+                dbus.Int32(3),
+                dbus.Dictionary({
+                    dbus.String('type'): dbus.String('separator'),
+                    dbus.String('visible'): dbus.Boolean(True),
+                }, signature=dbus.Signature('sv')),
+                dbus.Array([], signature=dbus.Signature('v'))
+            )))
+
+        # 3. "Select Server" Submenu
+        servers_menu_id = 10
+        server_children: List[dbus.Struct] = []
+
+        # Ping action
+        ping_act_id = self._register_action(self._run_ping_check)
+        server_children.append(dbus.Struct((
+            dbus.Int32(ping_act_id),
+            dbus.Dictionary({
+                dbus.String('label'): dbus.String(tr("btn_check_ping")),
+                dbus.String('enabled'): dbus.Boolean(True),
+                dbus.String('visible'): dbus.Boolean(True),
+            }, signature=dbus.Signature('sv')),
+            dbus.Array([], signature=dbus.Signature('v'))
+        )))
+        server_children.append(dbus.Struct((
+            dbus.Int32(11),
+            dbus.Dictionary({
+                dbus.String('type'): dbus.String('separator'),
+                dbus.String('visible'): dbus.Boolean(True),
+            }, signature=dbus.Signature('sv')),
+            dbus.Array([], signature=dbus.Signature('v'))
+        )))
 
         if not nodes:
-            empty_act = QAction(tr("no_servers"), self)
-            empty_act.setEnabled(False)
-            self.servers_menu.addAction(empty_act)
+            server_children.append(dbus.Struct((
+                dbus.Int32(12),
+                dbus.Dictionary({
+                    dbus.String('label'): dbus.String(tr("no_servers")),
+                    dbus.String('enabled'): dbus.Boolean(False),
+                    dbus.String('visible'): dbus.Boolean(True),
+                }, signature=dbus.Signature('sv')),
+                dbus.Array([], signature=dbus.Signature('v'))
+            )))
         else:
             for node in nodes:
                 name = node.get("name", "Server")
@@ -396,50 +601,152 @@ class SubDeckTrayApp(QObject):
                 if ping_val is not None:
                     label += f" • {ping_val}ms"
 
-                action = QAction(label, self)
-                action.setCheckable(True)
                 is_current = bool(
                     is_running and
                     selected_node and
                     node.get("server") == selected_node.get("server") and
                     node.get("port") == selected_node.get("port")
                 )
-                action.setChecked(is_current)
                 if is_current:
-                    action.setText(f"✔ {label}")
+                    label = f"✔ {label}"
 
-                action.triggered.connect(lambda checked, n=node: self._connect_node(n))
-                self.servers_menu.addAction(action)
+                node_act_id = self._register_action(lambda n=node: self._connect_node(n))
+                server_children.append(dbus.Struct((
+                    dbus.Int32(node_act_id),
+                    dbus.Dictionary({
+                        dbus.String('label'): dbus.String(label),
+                        dbus.String('enabled'): dbus.Boolean(True),
+                        dbus.String('visible'): dbus.Boolean(True),
+                    }, signature=dbus.Signature('sv')),
+                    dbus.Array([], signature=dbus.Signature('v'))
+                )))
 
-        # ── Rebuild Subscriptions Submenu ──
-        self.subscriptions_menu.clear()
+        self.menu_children_map[servers_menu_id] = server_children
+        new_root_items.append(dbus.Struct((
+            dbus.Int32(servers_menu_id),
+            dbus.Dictionary({
+                dbus.String('label'): dbus.String(tr("menu_select_server")),
+                dbus.String('children-display'): dbus.String('submenu'),
+                dbus.String('visible'): dbus.Boolean(True),
+            }, signature=dbus.Signature('sv')),
+            dbus.Array(server_children, signature=dbus.Signature('v'))
+        )))
 
-        # "Paste from Clipboard" action
-        paste_act = QAction(tr("btn_paste_sub"), self)
-        paste_act.triggered.connect(self._paste_and_add_subscription)
-        self.subscriptions_menu.addAction(paste_act)
+        # 4. Subscriptions Submenu
+        subs_menu_id = 20
+        subs_children: List[dbus.Struct] = []
 
-        refresh_act = QAction(tr("btn_refresh_all"), self)
-        refresh_act.triggered.connect(self._refresh_all_subscriptions)
-        self.subscriptions_menu.addAction(refresh_act)
-        self.subscriptions_menu.addSeparator()
+        paste_act_id = self._register_action(self._paste_and_add_subscription)
+        subs_children.append(dbus.Struct((
+            dbus.Int32(paste_act_id),
+            dbus.Dictionary({
+                dbus.String('label'): dbus.String(tr("btn_paste_sub")),
+                dbus.String('enabled'): dbus.Boolean(True),
+                dbus.String('visible'): dbus.Boolean(True),
+            }, signature=dbus.Signature('sv')),
+            dbus.Array([], signature=dbus.Signature('v'))
+        )))
+
+        refresh_act_id = self._register_action(self._refresh_all_subscriptions)
+        subs_children.append(dbus.Struct((
+            dbus.Int32(refresh_act_id),
+            dbus.Dictionary({
+                dbus.String('label'): dbus.String(tr("btn_refresh_all")),
+                dbus.String('enabled'): dbus.Boolean(True),
+                dbus.String('visible'): dbus.Boolean(True),
+            }, signature=dbus.Signature('sv')),
+            dbus.Array([], signature=dbus.Signature('v'))
+        )))
+
+        subs_children.append(dbus.Struct((
+            dbus.Int32(21),
+            dbus.Dictionary({
+                dbus.String('type'): dbus.String('separator'),
+                dbus.String('visible'): dbus.Boolean(True),
+            }, signature=dbus.Signature('sv')),
+            dbus.Array([], signature=dbus.Signature('v'))
+        )))
 
         subs = settings.get("subscriptions", [])
         if not subs:
-            no_subs_act = QAction(tr("no_subscriptions"), self)
-            no_subs_act.setEnabled(False)
-            self.subscriptions_menu.addAction(no_subs_act)
+            subs_children.append(dbus.Struct((
+                dbus.Int32(22),
+                dbus.Dictionary({
+                    dbus.String('label'): dbus.String(tr("no_subscriptions")),
+                    dbus.String('enabled'): dbus.Boolean(False),
+                    dbus.String('visible'): dbus.Boolean(True),
+                }, signature=dbus.Signature('sv')),
+                dbus.Array([], signature=dbus.Signature('v'))
+            )))
         else:
             for url in subs:
                 domain = url.split("://")[-1].split("/")[0] if "://" in url else url[:28]
-                sub_act = QAction(f"🔗 {domain} ({url[:35]}...)", self)
-                sub_act.setEnabled(False)
-                self.subscriptions_menu.addAction(sub_act)
+                sub_label = f"🔗 {domain} ({url[:35]}...)"
+                sub_id = self._register_action(lambda: None)
+                subs_children.append(dbus.Struct((
+                    dbus.Int32(sub_id),
+                    dbus.Dictionary({
+                        dbus.String('label'): dbus.String(sub_label),
+                        dbus.String('enabled'): dbus.Boolean(False),
+                        dbus.String('visible'): dbus.Boolean(True),
+                    }, signature=dbus.Signature('sv')),
+                    dbus.Array([], signature=dbus.Signature('v'))
+                )))
 
-        # ── Update Preset Checks ──
+        self.menu_children_map[subs_menu_id] = subs_children
+        new_root_items.append(dbus.Struct((
+            dbus.Int32(subs_menu_id),
+            dbus.Dictionary({
+                dbus.String('label'): dbus.String(tr("menu_subscriptions")),
+                dbus.String('children-display'): dbus.String('submenu'),
+                dbus.String('visible'): dbus.Boolean(True),
+            }, signature=dbus.Signature('sv')),
+            dbus.Array(subs_children, signature=dbus.Signature('v'))
+        )))
+
+        # 5. Routing Preset Submenu
+        preset_menu_id = 30
+        preset_children: List[dbus.Struct] = []
         current_preset = status.get("selected_preset", PRESET_DEFAULT)
-        self.action_preset_def.setText(f"{'✔ ' if current_preset == PRESET_DEFAULT else ''}{tr('preset_default')}")
-        self.action_preset_ros.setText(f"{'✔ ' if current_preset == PRESET_ROSCOMVPN else ''}{tr('preset_roscomvpn')}")
+
+        def_prefix = "✔ " if current_preset == PRESET_DEFAULT else ""
+        ros_prefix = "✔ " if current_preset == PRESET_ROSCOMVPN else ""
+
+        def_act_id = self._register_action(lambda: self._set_preset(PRESET_DEFAULT))
+        preset_children.append(dbus.Struct((
+            dbus.Int32(def_act_id),
+            dbus.Dictionary({
+                dbus.String('label'): dbus.String(f"{def_prefix}{tr('preset_default')}"),
+                dbus.String('enabled'): dbus.Boolean(True),
+                dbus.String('visible'): dbus.Boolean(True),
+            }, signature=dbus.Signature('sv')),
+            dbus.Array([], signature=dbus.Signature('v'))
+        )))
+
+        ros_act_id = self._register_action(lambda: self._set_preset(PRESET_ROSCOMVPN))
+        preset_children.append(dbus.Struct((
+            dbus.Int32(ros_act_id),
+            dbus.Dictionary({
+                dbus.String('label'): dbus.String(f"{ros_prefix}{tr('preset_roscomvpn')}"),
+                dbus.String('enabled'): dbus.Boolean(True),
+                dbus.String('visible'): dbus.Boolean(True),
+            }, signature=dbus.Signature('sv')),
+            dbus.Array([], signature=dbus.Signature('v'))
+        )))
+
+        self.menu_children_map[preset_menu_id] = preset_children
+        new_root_items.append(dbus.Struct((
+            dbus.Int32(preset_menu_id),
+            dbus.Dictionary({
+                dbus.String('label'): dbus.String(tr("menu_preset")),
+                dbus.String('children-display'): dbus.String('submenu'),
+                dbus.String('visible'): dbus.Boolean(True),
+            }, signature=dbus.Signature('sv')),
+            dbus.Array(preset_children, signature=dbus.Signature('v'))
+        )))
+
+        self.root_items = new_root_items
+        self.dbusmenu.bump_layout()
 
     def _disconnect_vpn(self):
         """Disconnects active VPN."""
@@ -464,20 +771,75 @@ class SubDeckTrayApp(QObject):
             self._poll_status_background()
         threading.Thread(target=_worker, daemon=True).start()
 
-    def _paste_and_add_subscription(self):
-        """Reads system clipboard and adds subscription URL."""
-        # Try Qt clipboard first, then system helper fallback
-        clip_text = QApplication.clipboard().text().strip()
-        if not clip_text:
-            clip_text = read_system_clipboard().strip()
+    def _read_clipboard_url(self) -> str:
+        """Reads subscription URL from Qt clipboard, Klipper DBus, or system helpers."""
+        valid_schemes = ("http://", "https://") + SUPPORTED_SCHEMES
 
-        # Validate URL scheme
-        is_valid = any(clip_text.lower().startswith(scheme) for scheme in ("http://", "https://") + SUPPORTED_SCHEMES)
+        def _clean_match(raw: str) -> Optional[str]:
+            if not raw:
+                return None
+            raw = str(raw).strip()
+            if any(raw.lower().startswith(s) for s in valid_schemes):
+                return raw
+            m = re.search(r'(https?://[^\s<>"\'\)]+|vless://[^\s<>"\'\)]+|vmess://[^\s<>"\'\)]+|ss://[^\s<>"\'\)]+|trojan://[^\s<>"\'\)]+)', raw, re.IGNORECASE)
+            if m:
+                return m.group(1).strip()
+            return None
+
+        # 1. Standard Qt clipboard
+        try:
+            txt = QApplication.clipboard().text()
+            m = _clean_match(txt)
+            if m:
+                return m
+        except Exception:
+            pass
+
+        # 2. KDE Klipper via DBus
+        try:
+            klipper_obj = self.session_bus.get_object('org.kde.klipper', '/klipper')
+            klipper_iface = dbus.Interface(klipper_obj, 'org.kde.klipper.klipper')
+            txt = klipper_iface.getClipboardContents()
+            m = _clean_match(txt)
+            if m:
+                return m
+            history = klipper_iface.getClipboardHistoryMenu()
+            for item in history:
+                m = _clean_match(item)
+                if m:
+                    return m
+        except Exception:
+            pass
+
+        # 3. System helper fallback
+        try:
+            sys_clip = read_system_clipboard()
+            m = _clean_match(sys_clip)
+            if m:
+                return m
+        except Exception:
+            pass
+
+        return ""
+
+    def _paste_and_add_subscription(self):
+        """Reads system clipboard and adds subscription URL, prompting user if not detected."""
+        clip_text = self._read_clipboard_url()
+
+        if not clip_text:
+            text, ok = QInputDialog.getText(
+                None,
+                tr("dialog_add_sub_title"),
+                tr("dialog_add_sub_msg"),
+            )
+            if ok and text.strip():
+                clip_text = text.strip()
+
+        is_valid = bool(clip_text) and any(clip_text.lower().startswith(scheme) for scheme in ("http://", "https://") + SUPPORTED_SCHEMES)
         if not is_valid:
-            self.tray.showMessage(
+            self._send_desktop_notification(
                 tr("app_title"),
                 tr("notify_sub_failed"),
-                QSystemTrayIcon.MessageIcon.Warning,
                 4000
             )
             return
@@ -485,7 +847,6 @@ class SubDeckTrayApp(QObject):
         def _worker():
             success = self.client.add_subscription(clip_text)
             if success:
-                # Refresh nodes to get count
                 nodes = self.client.get_nodes()
                 self.bridge.show_notification.emit(
                     tr("app_title"),
@@ -510,10 +871,9 @@ class SubDeckTrayApp(QObject):
 
     def _run_ping_check(self):
         """Measures latency of all candidate servers in background and sends popup notification."""
-        self.tray.showMessage(
+        self._send_desktop_notification(
             tr("app_title"),
             tr("notify_ping_measuring"),
-            QSystemTrayIcon.MessageIcon.Information,
             2000
         )
 
@@ -526,7 +886,6 @@ class SubDeckTrayApp(QObject):
     def _apply_ping_results(self, alive_nodes: List[Dict[str, Any]]):
         self.ping_map = {f"{n.get('server')}:{n.get('port')}": n.get("ping") for n in alive_nodes}
 
-        # Build human-readable ping report for notification
         report_lines = []
         for node in self.nodes:
             name = node.get("name", "Server")
@@ -538,17 +897,15 @@ class SubDeckTrayApp(QObject):
                 report_lines.append(f"• {name} — n/a")
 
         if report_lines:
-            report_text = "\n".join(report_lines[:8])  # Show up to 8 servers in popup
+            report_text = "\n".join(report_lines[:8])
             if len(report_lines) > 8:
                 report_text += f"\n... и ещё {len(report_lines) - 8}"
-            self.tray.showMessage(
+            self._send_desktop_notification(
                 tr("notify_ping_results"),
                 report_text,
-                QSystemTrayIcon.MessageIcon.Information,
                 7000
             )
 
-        # Re-apply menu with fresh ping latencies in item labels
         self._apply_state(self.status, self.nodes, self.settings)
 
 
@@ -558,7 +915,7 @@ class SubDeckTrayApp(QObject):
 
 def main():
     try:
-        ensure_desktop_entry(PLUGIN_DIR)
+        dbus.mainloop.pyqt6.DBusQtMainLoop(set_as_default=True)
     except Exception:
         pass
 

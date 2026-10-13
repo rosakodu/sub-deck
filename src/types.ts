@@ -54,7 +54,5 @@ export type TranslationKeys =
   | "clipboardEmptyOrBlocked"
   | "desktopTitle"
   | "desktopTrayToggle"
-  | "desktopTrayToggleDesc"
-  | "desktopLaunchBtn"
-  | "desktopTrayLaunched";
+  | "desktopTrayToggleDesc";
 

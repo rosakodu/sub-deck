@@ -17,7 +17,6 @@ from core.constants import FREE_SUBSCRIPTIONS, PRESET_ROSCOMVPN
 from core.system import get_user_home, read_system_clipboard
 from core.server import SubDeckApiServer
 from tray.desktop_integration import (
-    ensure_desktop_entry,
     set_autostart,
     get_desktop_integration_status,
     launch_tray_process,
@@ -67,7 +66,6 @@ class Plugin:
 
         if tray_enabled:
             try:
-                await self.loop.run_in_executor(None, ensure_desktop_entry, plugin_dir)
                 await self.loop.run_in_executor(None, set_autostart, plugin_dir, True)
                 await self.loop.run_in_executor(None, launch_tray_process, plugin_dir)
             except Exception as e:
@@ -282,7 +280,6 @@ class Plugin:
 
         plugin_dir = self.vpn.plugin_dir if self.vpn else os.path.dirname(os.path.abspath(__file__))
         if enable:
-            await self.loop.run_in_executor(None, ensure_desktop_entry, plugin_dir)
             await self.loop.run_in_executor(None, set_autostart, plugin_dir, True)
             await self.loop.run_in_executor(None, launch_tray_process, plugin_dir)
         else:

@@ -15,7 +15,7 @@ if BASE_DIR not in sys.path:
 
 from core.server import SubDeckApiServer
 from tray.api_client import SubDeckApiClient
-from tray.desktop_integration import get_desktop_paths, generate_desktop_file_content
+from tray.desktop_integration import get_desktop_paths, generate_autostart_content
 
 
 class MockVPN:
@@ -69,9 +69,10 @@ class MockPlugin:
 class TestSubDeckApi(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.plugin = MockPlugin()
-        self.server = SubDeckApiServer(self.plugin)
+        self.test_port = 45999
+        self.server = SubDeckApiServer(self.plugin, host="127.0.0.1", port=self.test_port, socket_path=None)
         await self.server.start()
-        self.client = SubDeckApiClient()
+        self.client = SubDeckApiClient(host="127.0.0.1", port=self.test_port)
 
     async def asyncTearDown(self):
         await self.server.stop()
@@ -99,9 +100,10 @@ class TestSubDeckApi(unittest.IsolatedAsyncioTestCase):
         status = await asyncio.to_thread(self.client.get_status)
         self.assertFalse(status.get("running"))
 
-    def test_desktop_entry_generation(self):
-        content = generate_desktop_file_content(BASE_DIR)
-        self.assertIn("Name=Sub-Deck VPN", content)
+    def test_autostart_generation(self):
+        content = generate_autostart_content(BASE_DIR)
+        self.assertIn("Name=Sub-Deck VPN Tray", content)
+        self.assertIn("NoDisplay=true", content)
         self.assertIn("Exec=python3", content)
         self.assertIn("tray/tray_app.py", content)
 

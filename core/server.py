@@ -18,9 +18,12 @@ from core.system import get_user_home
 class SubDeckApiServer:
     """Async HTTP daemon server for IPC control of VPN manager."""
 
-    def __init__(self, plugin_instance, logger=None):
+    def __init__(self, plugin_instance, logger=None, host: str = IPC_HOST, port: int = IPC_PORT, socket_path: str = IPC_SOCKET_PATH):
         self.plugin = plugin_instance
         self.logger = logger
+        self.host = host
+        self.port = port
+        self.socket_path = socket_path
         self.tcp_server: Optional[asyncio.AbstractServer] = None
         self.unix_server: Optional[asyncio.AbstractServer] = None
         self._running = False
@@ -37,38 +40,38 @@ class SubDeckApiServer:
             return
         self._running = True
 
-        # 1. Start TCP listener (127.0.0.1:45321)
+        # 1. Start TCP listener
         try:
             self.tcp_server = await asyncio.start_server(
                 self._handle_client,
-                host=IPC_HOST,
-                port=IPC_PORT,
+                host=self.host,
+                port=self.port,
                 reuse_address=True
             )
-            self.log(f"Listening on TCP http://{IPC_HOST}:{IPC_PORT}")
+            self.log(f"Listening on TCP http://{self.host}:{self.port}")
         except Exception as e:
-            self.log(f"Failed to start TCP listener on {IPC_HOST}:{IPC_PORT}: {e}")
+            self.log(f"Failed to start TCP listener on {self.host}:{self.port}: {e}")
 
-        # 2. Start Unix domain socket listener (/tmp/sub-deck.sock)
-        try:
-            if os.path.exists(IPC_SOCKET_PATH):
+        # 2. Start Unix domain socket listener
+        if self.socket_path:
+            try:
+                if os.path.exists(self.socket_path):
+                    try:
+                        os.remove(self.socket_path)
+                    except Exception:
+                        pass
+
+                self.unix_server = await asyncio.start_unix_server(
+                    self._handle_client,
+                    path=self.socket_path
+                )
                 try:
-                    os.remove(IPC_SOCKET_PATH)
+                    os.chmod(self.socket_path, 0o666)
                 except Exception:
                     pass
-
-            self.unix_server = await asyncio.start_unix_server(
-                self._handle_client,
-                path=IPC_SOCKET_PATH
-            )
-            # Allow non-root users (desktop session) to access the socket
-            try:
-                os.chmod(IPC_SOCKET_PATH, 0o666)
-            except Exception:
-                pass
-            self.log(f"Listening on Unix socket {IPC_SOCKET_PATH}")
-        except Exception as e:
-            self.log(f"Failed to start Unix socket listener: {e}")
+                self.log(f"Listening on Unix socket {self.socket_path}")
+            except Exception as e:
+                self.log(f"Failed to start Unix socket listener: {e}")
 
     async def stop(self) -> None:
         """Stops listeners and cleans up socket files."""
@@ -83,9 +86,9 @@ class SubDeckApiServer:
             await self.unix_server.wait_closed()
             self.unix_server = None
 
-        if os.path.exists(IPC_SOCKET_PATH):
+        if self.socket_path and os.path.exists(self.socket_path):
             try:
-                os.remove(IPC_SOCKET_PATH)
+                os.remove(self.socket_path)
             except Exception:
                 pass
         self.log("API Server stopped.")
