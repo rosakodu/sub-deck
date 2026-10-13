@@ -43,7 +43,8 @@ except ImportError:
 
 from tray.api_client import SubDeckApiClient
 from tray.desktop_integration import ensure_desktop_entry
-from core.constants import PRESET_DEFAULT, PRESET_ROSCOMVPN
+from core.constants import PRESET_DEFAULT, PRESET_ROSCOMVPN, SUPPORTED_SCHEMES
+from core.system import read_system_clipboard
 
 
 # ─────────────────────────────────────────────────────────────
@@ -56,17 +57,21 @@ STRINGS = {
         "status_connected": "Подключено: {name}",
         "status_disconnected": "Отключено",
         "status_offline": "Демон не отвечает",
-        "action_connect": "🟢 Подключить VPN",
         "action_disconnect": "🔴 Отключить VPN",
-        "menu_servers": "Серверы",
+        "menu_select_server": "Выбрать сервер",
         "menu_subscriptions": "Подписки",
         "menu_preset": "Пресет маршрутизации",
+        "btn_paste_sub": "📋 Вставить из буфера обмена",
         "btn_check_ping": "⚡ Проверить пинг",
         "btn_refresh_all": "🔄 Обновить все подписки",
         "preset_default": "Default (Весь трафик через VPN)",
         "preset_roscomvpn": "RoscomVPN (Анти-блокировка)",
         "notify_connected": "VPN подключен: {node}",
         "notify_disconnected": "VPN отключен",
+        "notify_sub_added": "Подписка добавлена: получено {count} серверов",
+        "notify_sub_failed": "Буфер обмена пуст или не содержит ссылку на подписку",
+        "notify_ping_measuring": "Измерение задержки серверов...",
+        "notify_ping_results": "Результаты пинга:",
         "no_servers": "Нет доступных серверов",
         "no_subscriptions": "Нет добавленных подписок",
     },
@@ -75,17 +80,21 @@ STRINGS = {
         "status_connected": "Connected: {name}",
         "status_disconnected": "Disconnected",
         "status_offline": "Daemon Offline",
-        "action_connect": "🟢 Connect VPN",
         "action_disconnect": "🔴 Disconnect VPN",
-        "menu_servers": "Servers",
+        "menu_select_server": "Select Server",
         "menu_subscriptions": "Subscriptions",
         "menu_preset": "Routing Preset",
+        "btn_paste_sub": "📋 Paste from Clipboard",
         "btn_check_ping": "⚡ Check Ping",
         "btn_refresh_all": "🔄 Refresh All Subscriptions",
         "preset_default": "Default (All traffic via VPN)",
         "preset_roscomvpn": "RoscomVPN (Bypass Censorship)",
         "notify_connected": "VPN Connected: {node}",
         "notify_disconnected": "VPN Disconnected",
+        "notify_sub_added": "Subscription added: {count} servers found",
+        "notify_sub_failed": "Clipboard is empty or does not contain a valid URL",
+        "notify_ping_measuring": "Measuring server latency...",
+        "notify_ping_results": "Ping Results:",
         "no_servers": "No available servers",
         "no_subscriptions": "No subscriptions added",
     }
@@ -209,7 +218,8 @@ QMenu::separator {
 
 class StateBridge(QObject):
     state_updated = pyqtSignal(object, object, object)
-    ping_updated = pyqtSignal(list)
+    ping_completed = pyqtSignal(list)
+    show_notification = pyqtSignal(str, str)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -233,27 +243,29 @@ class SubDeckTrayApp(QObject):
 
         # Connect signals
         self.bridge.state_updated.connect(self._apply_state)
-        self.bridge.ping_updated.connect(self._apply_ping_results)
+        self.bridge.ping_completed.connect(self._apply_ping_results)
+        self.bridge.show_notification.connect(self._on_notification)
 
         # Build menu
         self.menu = QMenu()
         self.menu.setStyleSheet(MENU_STYLESHEET)
 
-        # Status item
+        # Status item (always top)
         self.status_action = QAction(f"○ {tr('status_disconnected')}", self)
         self.status_action.setEnabled(False)
         self.menu.addAction(self.status_action)
         self.menu.addSeparator()
 
-        # Connect/Disconnect Toggle
-        self.toggle_action = QAction(tr("action_connect"), self)
-        self.toggle_action.triggered.connect(self._toggle_vpn)
-        self.menu.addAction(self.toggle_action)
+        # Disconnect Action (shown only when connected)
+        self.disconnect_action = QAction(tr("action_disconnect"), self)
+        self.disconnect_action.triggered.connect(self._disconnect_vpn)
+        self.disconnect_action.setVisible(False)
+        self.menu.addAction(self.disconnect_action)
+        self.disconnect_separator = self.menu.addSeparator()
+        self.disconnect_separator.setVisible(False)
 
-        self.menu.addSeparator()
-
-        # Servers Submenu
-        self.servers_menu = self.menu.addMenu(tr("menu_servers"))
+        # "Select Server" Submenu (all connections start here)
+        self.servers_menu = self.menu.addMenu(tr("menu_select_server"))
 
         # Subscriptions Submenu
         self.subscriptions_menu = self.menu.addMenu(tr("menu_subscriptions"))
@@ -294,6 +306,9 @@ class SubDeckTrayApp(QObject):
         pos = QCursor.pos()
         self.menu.popup(pos)
 
+    def _on_notification(self, title: str, message: str):
+        self.tray.showMessage(title, message, QSystemTrayIcon.MessageIcon.Information, 5000)
+
     def _poll_status_background(self):
         """Runs in separate thread and emits result via Qt Signal."""
         def _worker():
@@ -315,10 +330,10 @@ class SubDeckTrayApp(QObject):
             self._update_tray_icon("offline")
             self.tray.setToolTip(f"{tr('app_title')} - {tr('status_offline')}")
             self.status_action.setText(f"🔴 {tr('status_offline')}")
-            self.toggle_action.setEnabled(False)
+            self.disconnect_action.setVisible(False)
+            self.disconnect_separator.setVisible(False)
             return
 
-        self.toggle_action.setEnabled(True)
         is_running = bool(status.get("running"))
         selected_node = status.get("selected_node")
         node_name = selected_node.get("name", "") if selected_node else ""
@@ -346,17 +361,21 @@ class SubDeckTrayApp(QObject):
             tip = f"{tr('app_title')} - {tr('status_connected', name=node_name or 'Active')}"
             self.tray.setToolTip(tip)
             self.status_action.setText(f"🟢 {tr('status_connected', name=node_name[:26])}")
-            self.toggle_action.setText(tr("action_disconnect"))
+            # Show disconnect button when connected
+            self.disconnect_action.setVisible(True)
+            self.disconnect_separator.setVisible(True)
         else:
             self._update_tray_icon("disconnected")
             self.tray.setToolTip(f"{tr('app_title')} - {tr('status_disconnected')}")
             self.status_action.setText(f"⚪ {tr('status_disconnected')}")
-            self.toggle_action.setText(tr("action_connect"))
+            # Hide disconnect button when disconnected (user connects via "Select Server")
+            self.disconnect_action.setVisible(False)
+            self.disconnect_separator.setVisible(False)
 
-        # ── Rebuild Servers Submenu ──
+        # ── Rebuild "Select Server" Submenu ──
         self.servers_menu.clear()
 
-        # Ping action
+        # Ping action at top of servers menu
         ping_act = QAction(tr("btn_check_ping"), self)
         ping_act.triggered.connect(self._run_ping_check)
         self.servers_menu.addAction(ping_act)
@@ -380,6 +399,7 @@ class SubDeckTrayApp(QObject):
                 action = QAction(label, self)
                 action.setCheckable(True)
                 is_current = bool(
+                    is_running and
                     selected_node and
                     node.get("server") == selected_node.get("server") and
                     node.get("port") == selected_node.get("port")
@@ -393,6 +413,17 @@ class SubDeckTrayApp(QObject):
 
         # ── Rebuild Subscriptions Submenu ──
         self.subscriptions_menu.clear()
+
+        # "Paste from Clipboard" action
+        paste_act = QAction(tr("btn_paste_sub"), self)
+        paste_act.triggered.connect(self._paste_and_add_subscription)
+        self.subscriptions_menu.addAction(paste_act)
+
+        refresh_act = QAction(tr("btn_refresh_all"), self)
+        refresh_act.triggered.connect(self._refresh_all_subscriptions)
+        self.subscriptions_menu.addAction(refresh_act)
+        self.subscriptions_menu.addSeparator()
+
         subs = settings.get("subscriptions", [])
         if not subs:
             no_subs_act = QAction(tr("no_subscriptions"), self)
@@ -405,27 +436,21 @@ class SubDeckTrayApp(QObject):
                 sub_act.setEnabled(False)
                 self.subscriptions_menu.addAction(sub_act)
 
-        self.subscriptions_menu.addSeparator()
-        refresh_act = QAction(tr("btn_refresh_all"), self)
-        refresh_act.triggered.connect(self._refresh_all_subscriptions)
-        self.subscriptions_menu.addAction(refresh_act)
-
         # ── Update Preset Checks ──
         current_preset = status.get("selected_preset", PRESET_DEFAULT)
         self.action_preset_def.setText(f"{'✔ ' if current_preset == PRESET_DEFAULT else ''}{tr('preset_default')}")
         self.action_preset_ros.setText(f"{'✔ ' if current_preset == PRESET_ROSCOMVPN else ''}{tr('preset_roscomvpn')}")
 
-    def _toggle_vpn(self):
+    def _disconnect_vpn(self):
+        """Disconnects active VPN."""
         def _worker():
-            if self.last_connected_state:
-                self.client.disconnect()
-            else:
-                self.client.connect()
+            self.client.disconnect()
             time.sleep(0.4)
             self._poll_status_background()
         threading.Thread(target=_worker, daemon=True).start()
 
     def _connect_node(self, node: Dict[str, Any]):
+        """Directly activates VPN with the chosen server."""
         def _worker():
             self.client.connect(node)
             time.sleep(0.4)
@@ -439,6 +464,43 @@ class SubDeckTrayApp(QObject):
             self._poll_status_background()
         threading.Thread(target=_worker, daemon=True).start()
 
+    def _paste_and_add_subscription(self):
+        """Reads system clipboard and adds subscription URL."""
+        # Try Qt clipboard first, then system helper fallback
+        clip_text = QApplication.clipboard().text().strip()
+        if not clip_text:
+            clip_text = read_system_clipboard().strip()
+
+        # Validate URL scheme
+        is_valid = any(clip_text.lower().startswith(scheme) for scheme in ("http://", "https://") + SUPPORTED_SCHEMES)
+        if not is_valid:
+            self.tray.showMessage(
+                tr("app_title"),
+                tr("notify_sub_failed"),
+                QSystemTrayIcon.MessageIcon.Warning,
+                4000
+            )
+            return
+
+        def _worker():
+            success = self.client.add_subscription(clip_text)
+            if success:
+                # Refresh nodes to get count
+                nodes = self.client.get_nodes()
+                self.bridge.show_notification.emit(
+                    tr("app_title"),
+                    tr("notify_sub_added", count=len(nodes))
+                )
+            else:
+                self.bridge.show_notification.emit(
+                    tr("app_title"),
+                    tr("notify_sub_failed")
+                )
+            time.sleep(0.5)
+            self._poll_status_background()
+
+        threading.Thread(target=_worker, daemon=True).start()
+
     def _refresh_all_subscriptions(self):
         def _worker():
             self.client.update_all_subscriptions()
@@ -447,14 +509,46 @@ class SubDeckTrayApp(QObject):
         threading.Thread(target=_worker, daemon=True).start()
 
     def _run_ping_check(self):
+        """Measures latency of all candidate servers in background and sends popup notification."""
+        self.tray.showMessage(
+            tr("app_title"),
+            tr("notify_ping_measuring"),
+            QSystemTrayIcon.MessageIcon.Information,
+            2000
+        )
+
         def _worker():
-            alive = self.client.ping_nodes()
-            self.bridge.ping_updated.emit(alive)
+            alive_nodes = self.client.ping_nodes()
+            self.bridge.ping_completed.emit(alive_nodes)
+
         threading.Thread(target=_worker, daemon=True).start()
 
     def _apply_ping_results(self, alive_nodes: List[Dict[str, Any]]):
         self.ping_map = {f"{n.get('server')}:{n.get('port')}": n.get("ping") for n in alive_nodes}
-        # Re-apply menu with fresh ping latencies
+
+        # Build human-readable ping report for notification
+        report_lines = []
+        for node in self.nodes:
+            name = node.get("name", "Server")
+            key = f"{node.get('server')}:{node.get('port')}"
+            ping_val = self.ping_map.get(key)
+            if ping_val is not None:
+                report_lines.append(f"• {name} — {ping_val} ms")
+            else:
+                report_lines.append(f"• {name} — n/a")
+
+        if report_lines:
+            report_text = "\n".join(report_lines[:8])  # Show up to 8 servers in popup
+            if len(report_lines) > 8:
+                report_text += f"\n... и ещё {len(report_lines) - 8}"
+            self.tray.showMessage(
+                tr("notify_ping_results"),
+                report_text,
+                QSystemTrayIcon.MessageIcon.Information,
+                7000
+            )
+
+        # Re-apply menu with fresh ping latencies in item labels
         self._apply_state(self.status, self.nodes, self.settings)
 
 
@@ -463,7 +557,10 @@ class SubDeckTrayApp(QObject):
 # ─────────────────────────────────────────────────────────────
 
 def main():
-    ensure_desktop_entry(PLUGIN_DIR)
+    try:
+        ensure_desktop_entry(PLUGIN_DIR)
+    except Exception:
+        pass
 
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
