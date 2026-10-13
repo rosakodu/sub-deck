@@ -37,7 +37,12 @@ export const translations: Record<string, Record<TranslationKeys, string>> = {
     logCreated: "Log saved to sub-deck.log",
     pasteBtn: "Paste",
     pastedFromClipboard: "Pasted from clipboard",
-    clipboardEmptyOrBlocked: "Clipboard is empty or access blocked"
+    clipboardEmptyOrBlocked: "Clipboard is empty or access blocked",
+    desktopTitle: "Desktop Mode",
+    desktopTrayToggle: "System Tray Companion",
+    desktopTrayToggleDesc: "Auto-start tray icon to manage VPN in Desktop Mode without opening Steam",
+    desktopLaunchBtn: "Launch Tray Widget Now",
+    desktopTrayLaunched: "Tray widget launched"
   },
   russian: {
     title: "Управление VLESS",
@@ -75,7 +80,12 @@ export const translations: Record<string, Record<TranslationKeys, string>> = {
     logCreated: "Лог сохранен в sub-deck.log",
     pasteBtn: "Вставить",
     pastedFromClipboard: "Вставлено из буфера обмена",
-    clipboardEmptyOrBlocked: "Буфер обмена пуст или доступ ограничен"
+    clipboardEmptyOrBlocked: "Буфер обмена пуст или доступ ограничен",
+    desktopTitle: "Режим рабочего стола",
+    desktopTrayToggle: "Иконка в системном трее",
+    desktopTrayToggleDesc: "Автозапуск трея для управления VPN на рабочем столе без открытия Steam",
+    desktopLaunchBtn: "Запустить трей-виджет сейчас",
+    desktopTrayLaunched: "Трей-виджет запущен"
   },
   schinese: {
     title: "VLESS 管理",
@@ -113,7 +123,12 @@ export const translations: Record<string, Record<TranslationKeys, string>> = {
     logCreated: "日志已保存至 sub-deck.log",
     pasteBtn: "粘贴",
     pastedFromClipboard: "已从剪贴板粘贴",
-    clipboardEmptyOrBlocked: "剪贴板为空或拒绝访问"
+    clipboardEmptyOrBlocked: "剪贴板为空或拒绝访问",
+    desktopTitle: "桌面模式",
+    desktopTrayToggle: "系统托盘图标",
+    desktopTrayToggleDesc: "在桌面模式下自动启动托盘图标以管理 VPN，无需打开 Steam",
+    desktopLaunchBtn: "立即启动托盘小部件",
+    desktopTrayLaunched: "托盘小部件已启动"
   },
   tchinese: {
     title: "VLESS 管理",
@@ -151,7 +166,12 @@ export const translations: Record<string, Record<TranslationKeys, string>> = {
     logCreated: "日誌已儲存至 sub-deck.log",
     pasteBtn: "貼上",
     pastedFromClipboard: "已從剪貼簿貼上",
-    clipboardEmptyOrBlocked: "剪貼簿為空或拒絕存取"
+    clipboardEmptyOrBlocked: "剪貼簿為空或拒絕存取",
+    desktopTitle: "桌面模式",
+    desktopTrayToggle: "系統匣圖示",
+    desktopTrayToggleDesc: "在桌面模式下自動啟動系統匣圖示以管理 VPN，無需開啟 Steam",
+    desktopLaunchBtn: "立即啟動系統匣元件",
+    desktopTrayLaunched: "系統匣元件已啟動"
   },
   arabic: {
     title: "إدارة VLESS",
@@ -189,7 +209,12 @@ export const translations: Record<string, Record<TranslationKeys, string>> = {
     logCreated: "تم حفظ السجل في sub-deck.log",
     pasteBtn: "لصق",
     pastedFromClipboard: "تم اللصق من الحافظة",
-    clipboardEmptyOrBlocked: "الحافظة فارغة أو تم رفض الوصول"
+    clipboardEmptyOrBlocked: "الحافظة فارغة أو تم رفض الوصول",
+    desktopTitle: "Desktop Mode",
+    desktopTrayToggle: "System Tray Companion",
+    desktopTrayToggleDesc: "Auto-start tray icon to manage VPN in Desktop Mode without opening Steam",
+    desktopLaunchBtn: "Launch Tray Widget Now",
+    desktopTrayLaunched: "Tray widget launched"
   },
   persian: {
     title: "مدیریت VLESS",
@@ -227,7 +252,12 @@ export const translations: Record<string, Record<TranslationKeys, string>> = {
     logCreated: "لاگ در sub-deck.log ذخیره شد",
     pasteBtn: "جای‌گذاری",
     pastedFromClipboard: "از کلیپ‌بورد جای‌گذاری شد",
-    clipboardEmptyOrBlocked: "کلیپ‌بورد خالی است یا دسترسی مسدود شده"
+    clipboardEmptyOrBlocked: "کلیپ‌بورد خالی است یا دسترسی مسدود شده",
+    desktopTitle: "Desktop Mode",
+    desktopTrayToggle: "System Tray Companion",
+    desktopTrayToggleDesc: "Auto-start tray icon to manage VPN in Desktop Mode without opening Steam",
+    desktopLaunchBtn: "Launch Tray Widget Now",
+    desktopTrayLaunched: "Tray widget launched"
   },
   turkish: {
     title: "VPN Yapılandırmaları",
@@ -265,7 +295,12 @@ export const translations: Record<string, Record<TranslationKeys, string>> = {
     logCreated: "Günlük sub-deck.log dosyasına kaydedildi",
     pasteBtn: "Yapıştır",
     pastedFromClipboard: "Panodan yapıştırıldı",
-    clipboardEmptyOrBlocked: "Pano boş veya erişim engellendi"
+    clipboardEmptyOrBlocked: "Pano boş veya erişim engellendi",
+    desktopTitle: "Desktop Mode",
+    desktopTrayToggle: "System Tray Companion",
+    desktopTrayToggleDesc: "Auto-start tray icon to manage VPN in Desktop Mode without opening Steam",
+    desktopLaunchBtn: "Launch Tray Widget Now",
+    desktopTrayLaunched: "Tray widget launched"
   }
 };
 

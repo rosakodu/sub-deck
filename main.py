@@ -15,6 +15,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from core.constants import FREE_SUBSCRIPTIONS, PRESET_ROSCOMVPN
 from core.system import get_user_home, read_system_clipboard
+from core.server import SubDeckApiServer
+from tray.desktop_integration import (
+    ensure_desktop_entry,
+    set_autostart,
+    get_desktop_integration_status,
+    launch_tray_process,
+)
 from vpn_manager import VPNManager
 
 
@@ -22,9 +29,10 @@ class Plugin:
     """Decky plugin adapter class."""
 
     def __init__(self):
-        self.loop: Optional[asyncio.AbstractEventLoop] = None
-        self.vpn: Optional[VPNManager] = None
-        self.update_task: Optional[asyncio.Task] = None
+        self.loop = None
+        self.vpn = None
+        self.update_task = None
+        self.api_server = None
 
     async def _main(self):
         """Invoked by Decky Loader when the plugin is loaded."""
@@ -44,6 +52,16 @@ class Plugin:
 
         # Start background update daemon
         self.update_task = asyncio.create_task(self._auto_update_loop())
+
+        # Start local IPC API server for Desktop Mode tray integration
+        self.api_server = SubDeckApiServer(self, logger=decky.logger)
+        await self.api_server.start()
+
+        # Ensure Desktop application entry is available in KDE menu
+        try:
+            await self.loop.run_in_executor(None, ensure_desktop_entry, plugin_dir)
+        except Exception as e:
+            decky.logger.error(f"Failed to create desktop entry: {e}")
 
     # ────────────────────────────────────────────────
     # Frontend RPC API
@@ -239,11 +257,31 @@ class Plugin:
                 decky.logger.error(f"Auto update loop error: {e}")
             await asyncio.sleep(900)
 
+    async def get_desktop_status(self) -> dict:
+        """Returns desktop integration status (installed menu item and autostart)."""
+        plugin_dir = self.vpn.plugin_dir if self.vpn else os.path.dirname(os.path.abspath(__file__))
+        return await self.loop.run_in_executor(None, get_desktop_integration_status, plugin_dir)
+
+    async def set_desktop_autostart(self, enable: bool) -> bool:
+        """Enables or disables desktop autostart for the system tray widget."""
+        plugin_dir = self.vpn.plugin_dir if self.vpn else os.path.dirname(os.path.abspath(__file__))
+        return await self.loop.run_in_executor(None, set_autostart, plugin_dir, enable)
+
+    async def launch_desktop_tray(self) -> bool:
+        """Launches the desktop tray widget in the active graphical desktop session."""
+        plugin_dir = self.vpn.plugin_dir if self.vpn else os.path.dirname(os.path.abspath(__file__))
+        return await self.loop.run_in_executor(None, launch_tray_process, plugin_dir)
+
     # ────────────────────────────────────────────────
     # Lifecycle
     # ────────────────────────────────────────────────
 
     async def _unload(self) -> None:
+        if self.api_server:
+            try:
+                await self.api_server.stop()
+            except Exception as e:
+                decky.logger.error(f"Error stopping API server: {e}")
         if self.update_task:
             self.update_task.cancel()
         if self.vpn:
@@ -251,9 +289,21 @@ class Plugin:
         decky.logger.info("sub-deck unloaded")
 
     async def _uninstall(self) -> None:
+        if self.api_server:
+            try:
+                await self.api_server.stop()
+            except Exception as e:
+                pass
         if self.vpn:
             await self.loop.run_in_executor(None, self.vpn.stop)
+        # Also remove autostart when uninstalled
+        try:
+            plugin_dir = self.vpn.plugin_dir if self.vpn else os.path.dirname(os.path.abspath(__file__))
+            set_autostart(plugin_dir, False)
+        except Exception:
+            pass
         decky.logger.info("sub-deck uninstalled")
 
     async def _migration(self) -> None:
         pass
+

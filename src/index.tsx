@@ -3,6 +3,7 @@ import {
   PanelSection,
   PanelSectionRow,
   TextField,
+  ToggleField,
   Navigation,
   Focusable,
   staticClasses,
@@ -39,6 +40,10 @@ const isConnected = callable<[], boolean>("is_connected");
 const getSteamLanguage = callable<[], string>("get_steam_language");
 const exportLogs = callable<[], string>("export_logs");
 const getClipboard = callable<[], string>("get_clipboard");
+const getDesktopStatus = callable<[], { installed: boolean; autostart: boolean }>("get_desktop_status");
+const setDesktopAutostart = callable<[enable: boolean], boolean>("set_desktop_autostart");
+const launchDesktopTray = callable<[], boolean>("launch_desktop_tray");
+
 
 function unwrap<T>(payload: any): T {
   return payload && typeof payload === "object" && "result" in payload
@@ -57,6 +62,7 @@ function Content() {
   const [preset, setPreset] = useState<string>("default");
   const [expandedSubs, setExpandedSubs] = useState<Record<string, boolean>>({});
   const [presetExpanded, setPresetExpanded] = useState<boolean>(false);
+  const [trayAutostart, setTrayAutostart] = useState<boolean>(false);
 
   // Localization translator
   const t = useCallback(
@@ -95,6 +101,15 @@ function Content() {
           })
           .catch(console.error);
 
+        getDesktopStatus()
+          .then((res) => {
+            const data = unwrap<any>(res);
+            if (data && mounted) {
+              setTrayAutostart(!!data.autostart);
+            }
+          })
+          .catch(console.error);
+
         const rawSettings = await getSettings();
         const settings = unwrap<any>(rawSettings);
         if (settings && mounted) {
@@ -126,6 +141,25 @@ function Content() {
       mounted = false;
     };
   }, []);
+
+  const handleToggleTrayAutostart = async (enable: boolean) => {
+    setTrayAutostart(enable);
+    try {
+      await setDesktopAutostart(enable);
+    } catch (err) {
+      console.error("Failed to toggle desktop autostart:", err);
+    }
+  };
+
+  const handleLaunchTray = async () => {
+    try {
+      await launchDesktopTray();
+      toaster.toast({ title: t("desktopTitle"), body: t("desktopTrayLaunched") });
+    } catch (err) {
+      toaster.toast({ title: t("error"), body: `${err}` });
+    }
+  };
+
 
   const refreshSubscriptions = async () => {
     try {
@@ -596,6 +630,26 @@ function Content() {
             );
           })
         )}
+      </PanelSection>
+
+      {/* Секция интеграции с Desktop Mode */}
+      <PanelSection title={t("desktopTitle")}>
+        <PanelSectionRow>
+          <ToggleField
+            label={t("desktopTrayToggle")}
+            description={t("desktopTrayToggleDesc")}
+            checked={trayAutostart}
+            onChange={handleToggleTrayAutostart}
+          />
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <ButtonItem
+            layout="below"
+            onClick={handleLaunchTray}
+          >
+            {t("desktopLaunchBtn")}
+          </ButtonItem>
+        </PanelSectionRow>
       </PanelSection>
 
       {/* Кнопка экспорта логов */}

@@ -8,6 +8,7 @@ A Decky Loader plugin for Steam Deck that allows you to manage VLESS, VMess, Tro
 
 ## 📋 Features
 
+- **Desktop Mode System Tray Widget**: Full-featured system tray companion with an elegant pop-up widget for Desktop Mode. Manage VPN connections, toggle servers, add/refresh subscriptions and switch routing presets without opening Steam Big Picture!
 - **Multi-Protocol Support**: VLESS (Reality, TLS, None), VMess, Trojan, Shadowsocks, and Hysteria 2 / Hy2.
 - **Multiple Subscriptions**: Add and manage different subscription URLs simultaneously. Nodes from all subscriptions are automatically combined.
 - **System-wide TUN Routing**: Automatically routes all Steam Deck internet traffic through `sing-box` TUN interface (`tun0`).
@@ -16,6 +17,15 @@ A Decky Loader plugin for Steam Deck that allows you to manage VLESS, VMess, Tro
 - **Quick Logging**: Click the **LOG** button to write combined plugin & core logs to `/home/deck/sub-deck.log` and copy them to your clipboard.
 - **Root Privileges**: Correctly runs as `root` for network configuration.
 - **No Dependencies Needed**: Automatically downloads `sing-box` core binary on first connection.
+
+## 🖥️ Desktop Mode System Tray Companion
+
+You can control your VPN directly from Desktop Mode without opening Steam Big Picture:
+- **System Tray Icon**: Shows real-time connection state (Green = Connected, Gray = Disconnected, Yellow = Connecting).
+- **Quick Context Menu (Right Click)**: Toggle VPN, switch active servers in one click, change routing presets, or refresh subscriptions.
+- **Pop-up Widget (Left Click)**: Compact dark-themed control window to view latency ping, add new subscriptions with clipboard paste, and toggle desktop autostart.
+- **KDE Plasma Integration**: Creates an application entry in the desktop menu under *Internet / Utilities* and supports automatic launch on desktop login.
+
 
 ## 🎁 Built-in Free Subscriptions
 
