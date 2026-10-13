@@ -21,6 +21,7 @@ from tray.desktop_integration import (
     set_autostart,
     get_desktop_integration_status,
     launch_tray_process,
+    kill_tray_process,
 )
 from vpn_manager import VPNManager
 
@@ -57,11 +58,21 @@ class Plugin:
         self.api_server = SubDeckApiServer(self, logger=decky.logger)
         await self.api_server.start()
 
-        # Ensure Desktop application entry is available in KDE menu
-        try:
-            await self.loop.run_in_executor(None, ensure_desktop_entry, plugin_dir)
-        except Exception as e:
-            decky.logger.error(f"Failed to create desktop entry: {e}")
+        # Desktop tray integration (enabled by default on installation)
+        settings = self.vpn.load_settings()
+        tray_enabled = settings.get("desktop_tray_enabled", True)
+        if "desktop_tray_enabled" not in settings:
+            settings["desktop_tray_enabled"] = True
+            self.vpn.save_settings(settings)
+
+        if tray_enabled:
+            try:
+                await self.loop.run_in_executor(None, ensure_desktop_entry, plugin_dir)
+                await self.loop.run_in_executor(None, set_autostart, plugin_dir, True)
+                await self.loop.run_in_executor(None, launch_tray_process, plugin_dir)
+            except Exception as e:
+                decky.logger.error(f"Failed to start desktop tray: {e}")
+
 
     # ────────────────────────────────────────────────
     # Frontend RPC API
@@ -258,14 +269,26 @@ class Plugin:
             await asyncio.sleep(900)
 
     async def get_desktop_status(self) -> dict:
-        """Returns desktop integration status (installed menu item and autostart)."""
-        plugin_dir = self.vpn.plugin_dir if self.vpn else os.path.dirname(os.path.abspath(__file__))
-        return await self.loop.run_in_executor(None, get_desktop_integration_status, plugin_dir)
+        """Returns desktop tray integration status."""
+        settings = self.vpn.load_settings()
+        enabled = settings.get("desktop_tray_enabled", True)
+        return {"enabled": enabled}
 
     async def set_desktop_autostart(self, enable: bool) -> bool:
-        """Enables or disables desktop autostart for the system tray widget."""
+        """Toggles desktop tray companion auto-run and active process."""
+        settings = self.vpn.load_settings()
+        settings["desktop_tray_enabled"] = enable
+        self.vpn.save_settings(settings)
+
         plugin_dir = self.vpn.plugin_dir if self.vpn else os.path.dirname(os.path.abspath(__file__))
-        return await self.loop.run_in_executor(None, set_autostart, plugin_dir, enable)
+        if enable:
+            await self.loop.run_in_executor(None, ensure_desktop_entry, plugin_dir)
+            await self.loop.run_in_executor(None, set_autostart, plugin_dir, True)
+            await self.loop.run_in_executor(None, launch_tray_process, plugin_dir)
+        else:
+            await self.loop.run_in_executor(None, set_autostart, plugin_dir, False)
+            await self.loop.run_in_executor(None, kill_tray_process)
+        return True
 
     async def launch_desktop_tray(self) -> bool:
         """Launches the desktop tray widget in the active graphical desktop session."""
@@ -296,10 +319,11 @@ class Plugin:
                 pass
         if self.vpn:
             await self.loop.run_in_executor(None, self.vpn.stop)
-        # Also remove autostart when uninstalled
+        # Also remove autostart and kill tray process when uninstalled
         try:
             plugin_dir = self.vpn.plugin_dir if self.vpn else os.path.dirname(os.path.abspath(__file__))
             set_autostart(plugin_dir, False)
+            kill_tray_process()
         except Exception:
             pass
         decky.logger.info("sub-deck uninstalled")

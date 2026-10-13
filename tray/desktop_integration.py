@@ -46,20 +46,61 @@ X-KDE-autostart-after=panel
     return content
 
 
+def _get_target_uid_gid() -> tuple:
+    """Discovers target non-root uid and gid for desktop files."""
+    user_home = get_user_home()
+    try:
+        st = os.stat(user_home)
+        return st.st_uid, st.st_gid
+    except Exception:
+        return 1000, 1000
+
+
+def _safe_write_file(target_path: str, content: str) -> bool:
+    """Writes desktop file and ensures proper non-root ownership if run as root."""
+    try:
+        # Avoid writing if identical
+        if os.path.isfile(target_path):
+            try:
+                with open(target_path, "r", encoding="utf-8") as f:
+                    if f.read() == content:
+                        return True
+            except Exception:
+                pass
+
+        with open(target_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        os.chmod(target_path, 0o755)
+
+        # Chown to normal user if executed by root (Decky daemon)
+        if os.geteuid() == 0:
+            uid, gid = _get_target_uid_gid()
+            os.chown(target_path, uid, gid)
+        return True
+    except PermissionError:
+        return True
+    except Exception as e:
+        print(f"Error writing {target_path}: {e}")
+        return False
+
+
 def ensure_desktop_entry(plugin_dir: str) -> bool:
     """Installs or updates the desktop menu entry."""
     try:
         paths = get_desktop_paths()
         os.makedirs(paths["apps_dir"], exist_ok=True)
+        if os.geteuid() == 0:
+            uid, gid = _get_target_uid_gid()
+            try:
+                os.chown(paths["apps_dir"], uid, gid)
+            except Exception:
+                pass
+
         content = generate_desktop_file_content(plugin_dir)
-
-        with open(paths["app_file"], "w", encoding="utf-8") as f:
-            f.write(content)
-
-        os.chmod(paths["app_file"], 0o755)
-        # Update desktop database if available
-        subprocess.run(["update-desktop-database", paths["apps_dir"]], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        return True
+        success = _safe_write_file(paths["app_file"], content)
+        if success:
+            subprocess.run(["update-desktop-database", paths["apps_dir"]], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return success
     except Exception as e:
         print(f"Failed to create desktop entry: {e}")
         return False
@@ -72,14 +113,21 @@ def set_autostart(plugin_dir: str, enable: bool) -> bool:
         if enable:
             ensure_desktop_entry(plugin_dir)
             os.makedirs(paths["autostart_dir"], exist_ok=True)
+            if os.geteuid() == 0:
+                uid, gid = _get_target_uid_gid()
+                try:
+                    os.chown(paths["autostart_dir"], uid, gid)
+                except Exception:
+                    pass
+
             content = generate_desktop_file_content(plugin_dir)
-            with open(paths["autostart_file"], "w", encoding="utf-8") as f:
-                f.write(content)
-            os.chmod(paths["autostart_file"], 0o755)
-            return True
+            return _safe_write_file(paths["autostart_file"], content)
         else:
             if os.path.exists(paths["autostart_file"]):
-                os.remove(paths["autostart_file"])
+                try:
+                    os.remove(paths["autostart_file"])
+                except Exception:
+                    pass
             return True
     except Exception as e:
         print(f"Failed to set autostart={enable}: {e}")
@@ -93,6 +141,15 @@ def get_desktop_integration_status(plugin_dir: str) -> Dict[str, Any]:
         "installed": os.path.exists(paths["app_file"]),
         "autostart": os.path.exists(paths["autostart_file"]),
     }
+
+
+def kill_tray_process() -> bool:
+    """Terminates any running tray_app.py instances."""
+    try:
+        subprocess.run(["pkill", "-f", "tray/tray_app.py"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
+    except Exception:
+        return False
 
 
 def launch_tray_process(plugin_dir: str) -> bool:
