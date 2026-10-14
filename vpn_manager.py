@@ -6,6 +6,7 @@ Coordinates proxy cores (Xray-core + tun2socks), routing and subscription states
 import os
 import json
 import subprocess
+import tempfile
 import time
 from typing import Dict, List, Optional, Any
 
@@ -83,15 +84,16 @@ class VPNManager:
         return {"subscriptions": [], "selected_node": None}
 
     def save_settings(self, settings: Dict[str, Any]) -> None:
-        """Persists settings atomically."""
-        tmp_file = f"{self.settings_file}.tmp"
+        """Persists settings atomically using a temporary file."""
+        tmp_file = None
         try:
-            with open(tmp_file, "w", encoding="utf-8") as f:
+            with tempfile.NamedTemporaryFile("w", dir=self.settings_dir, delete=False, encoding="utf-8") as f:
+                tmp_file = f.name
                 json.dump(settings, f, indent=2)
             os.replace(tmp_file, self.settings_file)
         except Exception as e:
             self.log(f"Failed to save settings: {e}")
-            if os.path.exists(tmp_file):
+            if tmp_file and os.path.exists(tmp_file):
                 try:
                     os.remove(tmp_file)
                 except Exception:
@@ -112,16 +114,17 @@ class VPNManager:
         return self.get_nodes()
 
     def save_nodes(self, nodes: List[Dict[str, Any]]) -> None:
-        """Persists nodes list to disk."""
-        tmp_file = f"{self.nodes_cache_path}.tmp"
+        """Persists nodes list to disk atomically using a temporary file."""
+        tmp_file = None
         try:
-            with open(tmp_file, "w", encoding="utf-8") as f:
+            with tempfile.NamedTemporaryFile("w", dir=self.settings_dir, delete=False, encoding="utf-8") as f:
+                tmp_file = f.name
                 json.dump(nodes, f)
             os.replace(tmp_file, self.nodes_cache_path)
             self.log(f"Saved total of {len(nodes)} nodes to cache.")
         except Exception as e:
             self.log(f"Failed to save nodes cache: {e}")
-            if os.path.exists(tmp_file):
+            if tmp_file and os.path.exists(tmp_file):
                 try:
                     os.remove(tmp_file)
                 except Exception:
@@ -132,31 +135,42 @@ class VPNManager:
     # ────────────────────────────────────────────────
 
     def parse_subscription(self, url: str) -> tuple:
-        """Fetches and parses a single subscription URL."""
-        return parse_subscription_nodes(url, log_func=self.log)
+        """Fetches and parses a single subscription URL, returning (nodes, interval, metadata)."""
+        res = parse_subscription_nodes(url, log_func=self.log)
+        if len(res) == 3:
+            return res
+        return res[0], res[1], {}
 
     def parse_all_subscriptions(self) -> List[Dict[str, Any]]:
-        """Refreshes all subscribed endpoints and aggregates nodes."""
+        """Refreshes all subscribed endpoints, updates metadata and aggregates nodes."""
         settings = self.load_settings()
         urls = settings.get("subscriptions", [])
         all_nodes: List[Dict[str, Any]] = []
 
         update_intervals = settings.setdefault("update_intervals", {})
         last_update_times = settings.setdefault("last_update_times", {})
+        sub_metadata = settings.setdefault("subscription_metadata", {})
 
         self.log(f"Starting refresh of all subscriptions: {len(urls)} links")
         for url in urls:
             try:
-                nodes, interval = self.parse_subscription(url)
+                nodes, interval, meta = self.parse_subscription(url)
                 all_nodes.extend(nodes)
-                last_update_times[url] = int(time.time())
+                now_ts = int(time.time())
+                last_update_times[url] = now_ts
                 if interval is not None:
                     update_intervals[url] = int(interval)
+                if meta:
+                    existing_meta = sub_metadata.get(url, {})
+                    existing_meta.update(meta)
+                    existing_meta["last_updated"] = now_ts
+                    sub_metadata[url] = existing_meta
             except Exception as e:
                 self.log(f"Failed to parse subscription {url}: {e}")
 
         settings["update_intervals"] = update_intervals
         settings["last_update_times"] = last_update_times
+        settings["subscription_metadata"] = sub_metadata
         self.save_settings(settings)
         self.save_nodes(all_nodes)
 
@@ -189,20 +203,27 @@ class VPNManager:
         return self.parse_all_subscriptions()
 
     def remove_subscription(self, url: str) -> List[Dict[str, Any]]:
-        """Removes a subscription URL and prunes associated nodes."""
+        """Removes a subscription URL and prunes associated nodes and metadata."""
         settings = self.load_settings()
         subscriptions = settings.get("subscriptions", [])
         if url in subscriptions:
             subscriptions.remove(url)
             settings["subscriptions"] = subscriptions
+            # Prune metadata and intervals
+            if "subscription_metadata" in settings and url in settings["subscription_metadata"]:
+                del settings["subscription_metadata"][url]
+            if "last_update_times" in settings and url in settings["last_update_times"]:
+                del settings["last_update_times"][url]
+            if "update_intervals" in settings and url in settings["update_intervals"]:
+                del settings["update_intervals"][url]
             self.save_settings(settings)
             self.log(f"Removed subscription URL: {url}")
         return self.parse_all_subscriptions()
 
     def update_subscription(self, url: str) -> List[Dict[str, Any]]:
-        """Updates a single subscription and merges into current cache."""
+        """Updates a single subscription, updates metadata, and merges into current cache."""
         self.log(f"Updating single subscription: {url}")
-        new_nodes, interval = self.parse_subscription(url)
+        new_nodes, interval, meta = self.parse_subscription(url)
 
         current_nodes = self.load_nodes()
         # Retain nodes from other subscriptions
@@ -213,10 +234,17 @@ class VPNManager:
         settings = self.load_settings()
         last_updates = settings.setdefault("last_update_times", {})
         update_intervals = settings.setdefault("update_intervals", {})
+        sub_metadata = settings.setdefault("subscription_metadata", {})
 
-        last_updates[url] = int(time.time())
+        now_ts = int(time.time())
+        last_updates[url] = now_ts
         if interval is not None:
             update_intervals[url] = interval
+        if meta:
+            existing_meta = sub_metadata.get(url, {})
+            existing_meta.update(meta)
+            existing_meta["last_updated"] = now_ts
+            sub_metadata[url] = existing_meta
 
         self.save_settings(settings)
         return merged_nodes

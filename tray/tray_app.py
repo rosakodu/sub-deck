@@ -99,6 +99,31 @@ STRINGS = {
 }
 
 
+def format_bytes(b: Optional[int]) -> str:
+    if not b or b <= 0:
+        return "0 B"
+    units = ["B", "KB", "MB", "GB", "TB"]
+    val = float(b)
+    idx = 0
+    while val >= 1024.0 and idx < len(units) - 1:
+        val /= 1024.0
+        idx += 1
+    return f"{val:.1f} {units[idx]}"
+
+
+def format_expiry(expire_ts: Optional[int], lang: str) -> str:
+    if not expire_ts or expire_ts <= 0:
+        return ""
+    diff = expire_ts - int(time.time())
+    if diff <= 0:
+        return "Срок истёк" if lang == "ru" else "Expired"
+    days = diff // 86400
+    if days > 0:
+        return f"{days} дн." if lang == "ru" else f"{days}d left"
+    hours = diff // 3600
+    return f"{hours} ч." if lang == "ru" else f"{hours}h left"
+
+
 def get_lang() -> str:
     lang = os.environ.get("LANG", "").lower()
     return "ru" if lang.startswith("ru") else "en"
@@ -480,10 +505,19 @@ class SubDeckTrayApp:
         self.last_connected_state = is_running
 
         # Icon and Tooltip
+        sub_meta_dict = settings.get("subscription_metadata", {})
+        active_sub_url = selected_node.get("subscription_url") if selected_node else None
+        active_meta = sub_meta_dict.get(active_sub_url, {}) if active_sub_url else {}
+
+        traffic_str = ""
+        if active_meta.get("total"):
+            used = (active_meta.get("upload") or 0) + (active_meta.get("download") or 0)
+            traffic_str = f" [{format_bytes(used)} / {format_bytes(active_meta['total'])}]"
+
         if is_running:
             self.current_icon_struct = render_tray_icon("connected", 32)
-            self.current_tooltip = f"{tr('app_title')}: {node_name or 'Active'}"
-            status_label = f"🟢 {tr('status_connected', name=node_name[:26])}"
+            self.current_tooltip = f"{tr('app_title')}: {node_name or 'Active'}{traffic_str}"
+            status_label = f"🟢 {tr('status_connected', name=node_name[:26])}{traffic_str}"
         else:
             self.current_icon_struct = render_tray_icon("disconnected", 32)
             self.current_tooltip = f"{tr('app_title')} - {tr('status_disconnected')}"
@@ -685,9 +719,26 @@ class SubDeckTrayApp:
                 dbus.Array([], signature=dbus.Signature('v'))
             )))
         else:
+            sub_meta_dict = settings.get("subscription_metadata", {})
             for url in subs:
-                domain = url.split("://")[-1].split("/")[0] if "://" in url else url[:28]
-                sub_label = f"🔗 {domain} ({url[:35]}...)"
+                meta = sub_meta_dict.get(url, {})
+                title = meta.get("name")
+                if not title:
+                    domain = url.split("://")[-1].split("/")[0] if "://" in url else url[:28]
+                    title = domain
+
+                traffic_info = ""
+                if meta.get("total"):
+                    u = (meta.get("upload") or 0) + (meta.get("download") or 0)
+                    traffic_info = f" • {format_bytes(u)}/{format_bytes(meta['total'])}"
+
+                expiry_info = ""
+                if meta.get("expire"):
+                    exp_str = format_expiry(meta["expire"], get_lang())
+                    if exp_str:
+                        expiry_info = f" ({exp_str})"
+
+                sub_label = f"🔗 {title}{traffic_info}{expiry_info}"
                 sub_id = self._register_action(lambda: None)
                 subs_children.append(dbus.Struct((
                     dbus.Int32(sub_id),

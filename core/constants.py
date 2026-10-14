@@ -33,9 +33,11 @@ SUPPORTED_SCHEMES = (
 
 # User-Agents for subscription fetching
 SUBSCRIPTION_USER_AGENTS = [
-    "v2rayN/6.0",
-    "clash/1.18.0",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "clash-verge/v1.6.6",
+    "v2rayN/6.42",
+    "sing-box/1.9.0",
+    "FlClash/0.14.0",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
 ]
 
 # Binary download sources

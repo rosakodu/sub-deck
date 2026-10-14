@@ -279,6 +279,75 @@ def download_subscription_payload(url: str, timeout: float = 15.0) -> Tuple[Opti
     return None, None
 
 
+def parse_subscription_userinfo(headers: Any) -> Dict[str, int]:
+    """Parses subscription-userinfo header: upload, download, total, expire (in bytes/epoch)."""
+    userinfo: Dict[str, int] = {}
+    if not headers:
+        return userinfo
+
+    raw_header = None
+    for k, v in headers.items():
+        if k.lower() == "subscription-userinfo":
+            raw_header = v
+            break
+
+    if not raw_header:
+        return userinfo
+
+    # Typical format: upload=1073741824; download=5368709120; total=53687091200; expire=1735689600
+    for part in raw_header.split(";"):
+        part = part.strip()
+        if "=" in part:
+            key, val = part.split("=", 1)
+            key = key.strip().lower()
+            val = val.strip()
+            try:
+                if key in ("upload", "download", "total", "expire"):
+                    userinfo[key] = int(val)
+            except ValueError:
+                continue
+
+    return userinfo
+
+
+def parse_content_disposition_filename(headers: Any) -> Optional[str]:
+    """Extracts subscription filename/title from Content-Disposition header."""
+    if not headers:
+        return None
+
+    raw_header = None
+    for k, v in headers.items():
+        if k.lower() == "content-disposition":
+            raw_header = v
+            break
+
+    if not raw_header:
+        return None
+
+    # Try RFC 5987 filename*=UTF-8''...
+    match_rfc = re.search(r"filename\*\s*=\s*(?:UTF-8''|utf-8'')([^;\s]+)", raw_header, re.IGNORECASE)
+    if match_rfc:
+        try:
+            return urllib.parse.unquote(match_rfc.group(1)).strip().strip('"\'')
+        except Exception:
+            pass
+
+    # Try filename="abc" or filename=abc
+    match = re.search(r'filename\s*=\s*("([^"]+)"|([^;\s]+))', raw_header, re.IGNORECASE)
+    if match:
+        name = match.group(2) if match.group(2) is not None else match.group(3)
+        if name:
+            name = name.strip().strip('"\'')
+            # Decode if percent-encoded
+            try:
+                name = urllib.parse.unquote(name)
+            except Exception:
+                pass
+            return name
+
+    return None
+
+
 def extract_update_interval(headers: Any, text: str) -> Optional[int]:
     """Finds profile-update-interval from HTTP headers or payload text."""
     if headers:
@@ -319,19 +388,28 @@ def decode_subscription_lines(content: bytes) -> List[str]:
         return text.splitlines()
 
 
-def parse_subscription_nodes(url: str, log_func=None) -> Tuple[List[Dict[str, Any]], Optional[int]]:
-    """Fetches, parses and dedupes nodes for a subscription URL."""
+def parse_subscription_nodes(url: str, log_func=None) -> Tuple[List[Dict[str, Any]], Optional[int], Dict[str, Any]]:
+    """Fetches, parses and dedupes nodes for a subscription URL, returning (nodes, interval, metadata)."""
     content, headers = download_subscription_payload(url)
     if content is None:
         if log_func:
             log_func(f"Failed to download subscription content for: {url}")
-        return [], None
+        return [], None, {}
 
     try:
         raw_text = content.decode("utf-8", errors="ignore")
     except Exception:
         raw_text = ""
     interval = extract_update_interval(headers, raw_text)
+
+    metadata: Dict[str, Any] = {}
+    userinfo = parse_subscription_userinfo(headers)
+    if userinfo:
+        metadata.update(userinfo)
+
+    filename = parse_content_disposition_filename(headers)
+    if filename:
+        metadata["name"] = filename
 
     lines = decode_subscription_lines(content)
     raw_nodes = []
@@ -361,4 +439,4 @@ def parse_subscription_nodes(url: str, log_func=None) -> Tuple[List[Dict[str, An
     limit = FREE_SUBSCRIPTION_NODE_LIMIT if is_free_subscription(url) else REGULAR_SUBSCRIPTION_NODE_LIMIT
     selected_nodes = select_best_nodes(unique_nodes, target_count=limit, log_func=log_func)
 
-    return selected_nodes, interval
+    return selected_nodes, interval, metadata

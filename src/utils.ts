@@ -98,3 +98,40 @@ export async function readClipboardText(getBackendClipboard: () => Promise<any>)
 
   return "";
 }
+
+export function formatBytes(bytes?: number): string {
+  if (bytes === undefined || bytes === null || isNaN(bytes) || bytes <= 0) {
+    return "0 B";
+  }
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let val = bytes;
+  let idx = 0;
+  while (val >= 1024 && idx < units.length - 1) {
+    val /= 1024;
+    idx++;
+  }
+  return `${val.toFixed(1)} ${units[idx]}`;
+}
+
+export function formatExpiry(expireTimestamp?: number, lang?: string): string {
+  if (!expireTimestamp || expireTimestamp <= 0) {
+    return "";
+  }
+  const now = Math.floor(Date.now() / 1000);
+  const diff = expireTimestamp - now;
+
+  const isRu = lang === "russian";
+
+  if (diff <= 0) {
+    return isRu ? "Срок истёк" : "Expired";
+  }
+
+  const days = Math.floor(diff / 86400);
+  if (days > 0) {
+    return isRu ? `Осталось ${days} дн.` : `${days} days left`;
+  }
+
+  const hours = Math.floor(diff / 3600);
+  return isRu ? `Осталось ${hours} ч.` : `${hours} hrs left`;
+}
+

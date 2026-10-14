@@ -15,6 +15,24 @@ export interface NodeConfig {
   method?: string;
 }
 
+export interface SubscriptionMetadata {
+  name?: string;
+  upload?: number;
+  download?: number;
+  total?: number;
+  expire?: number;
+  last_updated?: number;
+}
+
+export interface Settings {
+  subscriptions: string[];
+  selected_node: NodeConfig | null;
+  selected_preset?: string;
+  subscription_metadata?: Record<string, SubscriptionMetadata>;
+  update_intervals?: Record<string, number>;
+  last_update_times?: Record<string, number>;
+}
+
 export type TranslationKeys =
   | "title"
   | "subUrlLabel"

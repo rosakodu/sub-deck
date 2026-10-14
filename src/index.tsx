@@ -16,7 +16,7 @@ import {
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { FaNetworkWired, FaClipboard } from "react-icons/fa";
 
-import { NodeConfig, TranslationKeys } from "./types";
+import { NodeConfig, TranslationKeys, SubscriptionMetadata, Settings } from "./types";
 import { SUPPORT_COMMUNITY_URL, PASTE_BUTTON_CSS } from "./constants";
 import { translations, getTranslation } from "./i18n";
 import {
@@ -24,10 +24,12 @@ import {
   getDomainLabel,
   getNodeMethodLabel,
   readClipboardText,
+  formatBytes,
+  formatExpiry,
 } from "./utils";
 
 // Backend RPC bridge
-const getSettings = callable<[], { subscriptions: string[]; selected_node: NodeConfig | null; selected_preset?: string }>("get_settings");
+const getSettings = callable<[], Settings>("get_settings");
 const addSubscription = callable<[url: string], NodeConfig[]>("add_subscription");
 const addFreeSubscriptions = callable<[], NodeConfig[]>("add_free_subscriptions");
 const removeSubscription = callable<[url: string], NodeConfig[]>("remove_subscription");
@@ -63,6 +65,7 @@ function Content() {
   const [expandedSubs, setExpandedSubs] = useState<Record<string, boolean>>({});
   const [presetExpanded, setPresetExpanded] = useState<boolean>(false);
   const [trayAutostart, setTrayAutostart] = useState<boolean>(true);
+  const [subMetadata, setSubMetadata] = useState<Record<string, SubscriptionMetadata>>({});
 
   // Localization translator
   const t = useCallback(
@@ -111,12 +114,15 @@ function Content() {
           .catch(console.error);
 
         const rawSettings = await getSettings();
-        const settings = unwrap<any>(rawSettings);
+        const settings = unwrap<Settings>(rawSettings);
         if (settings && mounted) {
           setSubscriptions(settings.subscriptions || []);
           setSelectedNode(settings.selected_node || null);
           if (settings.selected_preset) {
             setPreset(settings.selected_preset);
+          }
+          if (settings.subscription_metadata) {
+            setSubMetadata(settings.subscription_metadata);
           }
         }
 
@@ -156,9 +162,12 @@ function Content() {
   const refreshSubscriptions = async () => {
     try {
       const rawSettings = await getSettings();
-      const settings = unwrap<any>(rawSettings);
+      const settings = unwrap<Settings>(rawSettings);
       if (settings?.subscriptions) {
         setSubscriptions(settings.subscriptions);
+      }
+      if (settings?.subscription_metadata) {
+        setSubMetadata(settings.subscription_metadata);
       }
     } catch (e) {
       console.error("Failed to refresh subscriptions:", e);
@@ -505,11 +514,16 @@ function Content() {
           subscriptions.map((url, idx) => {
             const subNodes = nodesBySubscription[url] || [];
             const isFreeConfigs = isFreeSubscriptionUrl(url);
-            const domainLabel = getDomainLabel(url, lang);
+            const meta = subMetadata[url] || {};
+            const domainLabel = meta.name ? meta.name : getDomainLabel(url, lang);
             const isExpanded =
               expandedSubs[url] !== undefined
                 ? expandedSubs[url]
                 : connected && selectedNode?.subscription_url === url;
+
+            const usedBytes = (meta.upload || 0) + (meta.download || 0);
+            const hasTrafficInfo = meta.total && meta.total > 0;
+            const expiryLabel = meta.expire ? formatExpiry(meta.expire, lang) : "";
 
             return (
               <PanelSection key={idx}>
@@ -519,13 +533,30 @@ function Content() {
                     layout="below"
                     onClick={() => setExpandedSubs((prev) => ({ ...prev, [url]: !prev[url] }))}
                   >
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
-                      <span style={{ fontSize: "11px", fontWeight: "bold", color: "#a5a5a5", textTransform: "uppercase", letterSpacing: "0.5px" }}>
-                        {domainLabel}
-                      </span>
-                      <span style={{ fontSize: "10px", color: "#888" }}>
-                        {isExpanded ? "▼" : "▶"}
-                      </span>
+                    <div style={{ display: "flex", flexDirection: "column", width: "100%", gap: "4px" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
+                        <span style={{ fontSize: "12px", fontWeight: "bold", color: "#e0e0e0", textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {domainLabel}
+                        </span>
+                        <span style={{ fontSize: "10px", color: "#888", marginLeft: "6px" }}>
+                          {isExpanded ? "▼" : "▶"}
+                        </span>
+                      </div>
+
+                      {(hasTrafficInfo || expiryLabel) && (
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "10px", color: "#888" }}>
+                          {hasTrafficInfo && (
+                            <span>
+                              {formatBytes(usedBytes)} / {formatBytes(meta.total)}
+                            </span>
+                          )}
+                          {expiryLabel && (
+                            <span style={{ color: expiryLabel.includes("истёк") || expiryLabel.includes("Expired") ? "#ff4d4f" : "#1a9fff" }}>
+                              {expiryLabel}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </ButtonItem>
                 </PanelSectionRow>
