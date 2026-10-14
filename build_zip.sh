@@ -32,6 +32,7 @@ cp -r tray/* "${BUILD_DIR}/${PLUGIN_NAME}/tray/"
 
 [ -d assets ] && cp -r assets "${BUILD_DIR}/${PLUGIN_NAME}/"
 [ -d defaults ] && cp -r defaults "${BUILD_DIR}/${PLUGIN_NAME}/"
+rm -rf "${BUILD_DIR}/${PLUGIN_NAME}/defaults/bin"
 [ -d py_modules ] && cp -r py_modules "${BUILD_DIR}/${PLUGIN_NAME}/"
 
 echo "🗜️ Packaging ${ZIP_NAME}..."
