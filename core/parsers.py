@@ -250,6 +250,158 @@ def parse_hysteria2_link(link: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def parse_clash_proxy(proxy: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Converts a Clash/Mihomo YAML proxy dict into sub-deck internal node structure."""
+    if not isinstance(proxy, dict):
+        return None
+
+    proto = str(proxy.get("type", "")).lower()
+    name = str(proxy.get("name", "Proxy"))
+    server = str(proxy.get("server", ""))
+    port = int(proxy.get("port", 443))
+
+    if not server or not port:
+        return None
+
+    if proto == "vless":
+        uuid = str(proxy.get("uuid", ""))
+        network = str(proxy.get("network", "tcp")).lower()
+        tls = bool(proxy.get("tls", False))
+        flow = str(proxy.get("flow", ""))
+        reality_opts = proxy.get("reality-opts") or {}
+
+        security = "none"
+        pbk = ""
+        sid = ""
+        spx = ""
+        if reality_opts:
+            security = "reality"
+            pbk = str(reality_opts.get("public-key", ""))
+            sid = str(reality_opts.get("short-id", ""))
+            spx = str(reality_opts.get("spider-x", ""))
+        elif tls:
+            security = "tls"
+
+        sni = str(proxy.get("servername") or proxy.get("sni") or "")
+        fp = str(proxy.get("client-fingerprint", "chrome"))
+
+        grpc_opts = proxy.get("grpc-opts") or {}
+        service_name = str(grpc_opts.get("grpc-service-name", ""))
+
+        ws_opts = proxy.get("ws-opts") or {}
+        ws_path = str(ws_opts.get("path", "/"))
+        ws_headers = ws_opts.get("headers") or {}
+        ws_host = str(ws_headers.get("Host", ""))
+
+        return {
+            "type": "vless",
+            "name": name,
+            "server": server,
+            "port": port,
+            "uuid": uuid,
+            "security": security,
+            "sni": sni,
+            "pbk": pbk,
+            "sid": sid,
+            "spx": spx,
+            "flow": flow,
+            "fp": fp,
+            "transport": network,
+            "service_name": service_name,
+            "path": ws_path,
+            "host": ws_host,
+        }
+
+    elif proto == "vmess":
+        uuid = str(proxy.get("uuid", ""))
+        network = str(proxy.get("network", "tcp")).lower()
+        tls = bool(proxy.get("tls", False))
+        sni = str(proxy.get("servername") or proxy.get("sni") or "")
+        ws_opts = proxy.get("ws-opts") or {}
+        path = str(ws_opts.get("path", "/"))
+        ws_headers = ws_opts.get("headers") or {}
+        host = str(ws_headers.get("Host", ""))
+
+        return {
+            "type": "vmess",
+            "name": name,
+            "server": server,
+            "port": port,
+            "uuid": uuid,
+            "security": "tls" if tls else "none",
+            "sni": sni,
+            "transport": network,
+            "path": path,
+            "host": host,
+        }
+
+    elif proto == "trojan":
+        password = str(proxy.get("password", ""))
+        sni = str(proxy.get("sni") or proxy.get("servername") or "")
+        return {
+            "type": "trojan",
+            "name": name,
+            "server": server,
+            "port": port,
+            "password": password,
+            "security": "tls",
+            "sni": sni,
+        }
+
+    elif proto in ("ss", "shadowsocks"):
+        cipher = str(proxy.get("cipher", ""))
+        password = str(proxy.get("password", ""))
+        return {
+            "type": "shadowsocks",
+            "name": name,
+            "server": server,
+            "port": port,
+            "method": cipher,
+            "password": password,
+            "security": "none",
+        }
+
+    elif proto in ("hysteria2", "hy2"):
+        password = str(proxy.get("password", ""))
+        sni = str(proxy.get("sni") or "")
+        insecure = bool(proxy.get("skip-cert-verify", False))
+        obfs_opts = proxy.get("obfs") or ""
+        obfs_pass = proxy.get("obfs-password") or ""
+        return {
+            "type": "hysteria2",
+            "name": name,
+            "server": server,
+            "port": port,
+            "password": password,
+            "security": "tls",
+            "sni": sni,
+            "insecure": insecure,
+            "obfs_type": obfs_opts,
+            "obfs_password": obfs_pass,
+        }
+
+    return None
+
+
+def parse_clash_yaml_nodes(content: bytes) -> List[Dict[str, Any]]:
+    """Extracts proxies from Clash / Mihomo YAML payload."""
+    try:
+        import yaml
+        data = yaml.safe_load(content)
+        if isinstance(data, dict):
+            proxies = data.get("proxies", [])
+            if isinstance(proxies, list):
+                nodes = []
+                for p in proxies:
+                    parsed = parse_clash_proxy(p)
+                    if parsed:
+                        nodes.append(parsed)
+                return nodes
+    except Exception:
+        pass
+    return []
+
+
 def parse_node_link(link: str) -> Optional[Dict[str, Any]]:
     """Dispatches line to appropriate protocol parser."""
     line = link.strip()
@@ -411,13 +563,20 @@ def parse_subscription_nodes(url: str, log_func=None) -> Tuple[List[Dict[str, An
     if filename:
         metadata["name"] = filename
 
-    lines = decode_subscription_lines(content)
+    # Check if subscription is a Clash / Mihomo YAML payload
+    yaml_nodes = parse_clash_yaml_nodes(content)
     raw_nodes = []
-    for line in lines:
-        node = parse_node_link(line)
-        if node:
+    if yaml_nodes:
+        for node in yaml_nodes:
             node["subscription_url"] = url
             raw_nodes.append(node)
+    else:
+        lines = decode_subscription_lines(content)
+        for line in lines:
+            node = parse_node_link(line)
+            if node:
+                node["subscription_url"] = url
+                raw_nodes.append(node)
 
     # Deduplicate nodes by (name, server, port)
     seen_names = set()

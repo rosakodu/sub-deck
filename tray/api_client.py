@@ -18,7 +18,7 @@ class SubDeckApiClient:
         self.base_url = f"http://{host}:{port}/api"
         self.timeout = timeout
 
-    def _request(self, method: str, endpoint: str, data: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+    def _request(self, method: str, endpoint: str, data: Optional[Dict[str, Any]] = None, timeout: Optional[float] = None) -> Optional[Dict[str, Any]]:
         """Performs HTTP request to the local daemon."""
         url = f"{self.base_url}{endpoint}"
         body_bytes = None
@@ -29,8 +29,9 @@ class SubDeckApiClient:
             headers["Content-Type"] = "application/json; charset=utf-8"
 
         req = urllib.request.Request(url, data=body_bytes, headers=headers, method=method)
+        req_timeout = timeout if timeout is not None else self.timeout
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with urllib.request.urlopen(req, timeout=req_timeout) as resp:
                 resp_data = resp.read().decode("utf-8", errors="replace")
                 if resp_data:
                     return json.loads(resp_data)
@@ -74,22 +75,22 @@ class SubDeckApiClient:
 
     def add_subscription(self, url: str) -> bool:
         """Adds and parses a new subscription endpoint."""
-        res = self._request("POST", "/subscription/add", {"url": url})
+        res = self._request("POST", "/subscription/add", {"url": url}, timeout=30.0)
         return bool(res and res.get("success"))
 
     def remove_subscription(self, url: str) -> bool:
         """Removes an existing subscription URL."""
-        res = self._request("POST", "/subscription/remove", {"url": url})
+        res = self._request("POST", "/subscription/remove", {"url": url}, timeout=10.0)
         return bool(res and res.get("success"))
 
     def update_subscription(self, url: str) -> bool:
         """Refreshes a specific subscription."""
-        res = self._request("POST", "/subscription/update", {"url": url})
+        res = self._request("POST", "/subscription/update", {"url": url}, timeout=30.0)
         return bool(res and res.get("success"))
 
     def update_all_subscriptions(self) -> bool:
         """Refreshes all configured subscriptions."""
-        res = self._request("POST", "/subscription/update_all")
+        res = self._request("POST", "/subscription/update_all", timeout=60.0)
         return bool(res and res.get("success"))
 
     def set_preset(self, preset: str) -> bool:

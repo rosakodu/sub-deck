@@ -928,11 +928,20 @@ class SubDeckTrayApp:
     def _prompt_kdialog(self, title: str, text: str, default: str = "") -> Optional[str]:
         """Shows native KDE input dialog via kdialog."""
         try:
+            env = os.environ.copy()
+            if not env.get("DISPLAY"):
+                env["DISPLAY"] = ":0"
+            if not env.get("WAYLAND_DISPLAY"):
+                env["WAYLAND_DISPLAY"] = "wayland-0"
+            if not env.get("XDG_RUNTIME_DIR"):
+                env["XDG_RUNTIME_DIR"] = "/run/user/1000"
+
             res = subprocess.run(
                 ["kdialog", "--title", title, "--inputbox", text, default],
                 capture_output=True,
                 text=True,
-                timeout=30
+                env=env,
+                timeout=120
             )
             if res.returncode == 0:
                 return res.stdout.strip()
@@ -941,27 +950,28 @@ class SubDeckTrayApp:
         return None
 
     def _paste_and_add_subscription(self):
-        clip_text = self._read_clipboard_url()
-
-        if not clip_text:
-            # Fallback to kdialog if clipboard doesn't contain a link
-            val = self._prompt_kdialog(
-                tr("dialog_add_sub_title"),
-                tr("dialog_add_sub_msg")
-            )
-            if val and val.strip():
-                clip_text = val.strip()
-
-        is_valid = bool(clip_text) and any(clip_text.lower().startswith(scheme) for scheme in ("http://", "https://") + SUPPORTED_SCHEMES)
-        if not is_valid:
-            self._send_desktop_notification(
-                tr("app_title"),
-                tr("notify_sub_failed"),
-                4000
-            )
-            return
-
         def _worker():
+            clip_text = self._read_clipboard_url()
+
+            if not clip_text:
+                # Fallback to kdialog if clipboard doesn't contain a link
+                val = self._prompt_kdialog(
+                    tr("dialog_add_sub_title"),
+                    tr("dialog_add_sub_msg")
+                )
+                if val and val.strip():
+                    clip_text = val.strip()
+
+            is_valid = bool(clip_text) and any(clip_text.lower().startswith(scheme) for scheme in ("http://", "https://") + SUPPORTED_SCHEMES)
+            if not is_valid:
+                GLib.idle_add(
+                    self._send_desktop_notification,
+                    tr("app_title"),
+                    tr("notify_sub_failed"),
+                    4000
+                )
+                return
+
             success = self.client.add_subscription(clip_text)
             if success:
                 nodes = self.client.get_nodes()
@@ -984,24 +994,25 @@ class SubDeckTrayApp:
         threading.Thread(target=_worker, daemon=True).start()
 
     def _prompt_manual_subscription(self):
-        val = self._prompt_kdialog(
-            tr("dialog_add_sub_title"),
-            tr("dialog_add_sub_msg")
-        )
-        if not val or not val.strip():
-            return
-
-        url = val.strip()
-        is_valid = any(url.lower().startswith(scheme) for scheme in ("http://", "https://") + SUPPORTED_SCHEMES)
-        if not is_valid:
-            self._send_desktop_notification(
-                tr("app_title"),
-                tr("notify_sub_failed"),
-                4000
-            )
-            return
-
         def _worker():
+            val = self._prompt_kdialog(
+                tr("dialog_add_sub_title"),
+                tr("dialog_add_sub_msg")
+            )
+            if not val or not val.strip():
+                return
+
+            url = val.strip()
+            is_valid = any(url.lower().startswith(scheme) for scheme in ("http://", "https://") + SUPPORTED_SCHEMES)
+            if not is_valid:
+                GLib.idle_add(
+                    self._send_desktop_notification,
+                    tr("app_title"),
+                    tr("notify_sub_failed"),
+                    4000
+                )
+                return
+
             success = self.client.add_subscription(url)
             if success:
                 nodes = self.client.get_nodes()
