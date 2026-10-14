@@ -144,7 +144,19 @@ def read_system_clipboard() -> str:
     Reads the system clipboard on Steam Deck.
     Supports Gamescope / X11 (Gaming Mode) and KDE Klipper (Desktop Mode).
     """
-    # 1. Gamescope / X11 clipboard via deck user
+    user_home = get_user_home()
+    user_name = os.path.basename(user_home) or "deck"
+    uid = 1000
+    try:
+        import pwd
+        uid = pwd.getpwnam(user_name).pw_uid
+    except Exception:
+        pass
+
+    user_prefix = ["sudo", "-u", user_name] if os.geteuid() == 0 else []
+    bus_env = [f"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus"]
+
+    # 1. Gamescope / X11 clipboard
     x11_helper = (
         "import ctypes\n"
         "x11 = ctypes.cdll.LoadLibrary('libX11.so.6')\n"
@@ -186,50 +198,59 @@ def read_system_clipboard() -> str:
         "        x11.XCloseDisplay(display)\n"
     )
     try:
-        res = subprocess.run(
-            ["sudo", "-u", "deck", "python3", "-c", x11_helper],
-            capture_output=True, text=True, timeout=2
-        )
+        cmd = user_prefix + ["python3", "-c", x11_helper]
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=2)
         if res.returncode == 0 and res.stdout.strip():
             return res.stdout.strip()
     except Exception:
         pass
 
-    # 2. KDE Klipper via qdbus (Desktop Mode)
-    for qdbus_bin in ("qdbus", "qdbus-qt5"):
+    # 2. KDE Klipper via qdbus6 / qdbus / qdbus-qt5 (Desktop Mode)
+    prefixes = ("http://", "https://", "vless://", "vmess://", "ss://", "trojan://", "sub://")
+    for qdbus_bin in ("qdbus6", "qdbus", "qdbus-qt5"):
+        # Check current clipboard
         try:
-            res = subprocess.run(
-                [
-                    "sudo", "-u", "deck",
-                    "env", "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus",
-                    qdbus_bin, "org.kde.klipper", "/klipper", "getClipboardContents"
-                ],
-                capture_output=True, text=True, timeout=2
-            )
+            cmd = user_prefix + ["env"] + bus_env + [qdbus_bin, "org.kde.klipper", "/klipper", "getClipboardContents"]
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=2)
             if res.returncode == 0 and res.stdout.strip():
-                return res.stdout.strip()
+                txt = res.stdout.strip()
+                if any(txt.lower().startswith(p) for p in prefixes):
+                    return txt
+        except Exception:
+            pass
+
+        # Check history menu
+        try:
+            cmd = user_prefix + ["env"] + bus_env + [qdbus_bin, "org.kde.klipper", "/klipper", "getClipboardHistoryMenu"]
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=2)
+            if res.returncode == 0 and res.stdout.strip():
+                for line in res.stdout.splitlines():
+                    line = line.strip()
+                    if any(line.lower().startswith(p) for p in prefixes):
+                        return line
+                    m = re.search(r'(https?://[^\s<>"\'\)]+|vless://[^\s<>"\'\)]+)', line)
+                    if m:
+                        return m.group(1)
         except Exception:
             pass
 
     # 3. KDE Klipper via dbus-send fallback
     try:
-        res = subprocess.run(
-            [
-                "sudo", "-u", "deck",
-                "env", "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus",
-                "dbus-send", "--session", "--dest=org.kde.klipper",
-                "--type=method_call", "--print-reply",
-                "/klipper", "org.kde.klipper.klipper.getClipboardContents"
-            ],
-            capture_output=True, text=True, timeout=2
-        )
+        cmd = user_prefix + [
+            "env"
+        ] + bus_env + [
+            "dbus-send", "--session", "--dest=org.kde.klipper",
+            "--type=method_call", "--print-reply",
+            "/klipper", "org.kde.klipper.klipper.getClipboardContents"
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=2)
         if res.returncode == 0 and "string" in res.stdout:
             for line in res.stdout.splitlines():
                 if "string" in line:
                     parts = line.split("string", 1)
                     if len(parts) > 1:
                         val = parts[1].strip().strip('"')
-                        if val:
+                        if val and not val.startswith("▨"):
                             return val
     except Exception:
         pass

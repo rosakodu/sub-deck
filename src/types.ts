@@ -51,4 +51,8 @@ export type TranslationKeys =
   | "logCreated"
   | "pasteBtn"
   | "pastedFromClipboard"
-  | "clipboardEmptyOrBlocked";
+  | "clipboardEmptyOrBlocked"
+  | "desktopTitle"
+  | "desktopTrayToggle"
+  | "desktopTrayToggleDesc";
+
