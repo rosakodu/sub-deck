@@ -132,7 +132,33 @@ def get_desktop_integration_status(plugin_dir: str) -> Dict[str, Any]:
 
 
 def kill_tray_process() -> bool:
-    """Terminates any running tray_app.py instances."""
+    """Terminates any running tray_app.py instances via systemd user unit and pkill fallback."""
+    user_home = get_user_home()
+    user_name = os.path.basename(user_home) or "deck"
+
+    uid = 1000
+    try:
+        import pwd
+        uid = pwd.getpwnam(user_name).pw_uid
+    except Exception:
+        pass
+
+    # 1. Stop systemd user unit if managed
+    try:
+        if os.geteuid() == 0:
+            subprocess.run(
+                ["sudo", "-u", user_name, "env", f"XDG_RUNTIME_DIR=/run/user/{uid}", "systemctl", "--user", "stop", "sub-deck-tray.service"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3
+            )
+        else:
+            subprocess.run(
+                ["systemctl", "--user", "stop", "sub-deck-tray.service"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3
+            )
+    except Exception:
+        pass
+
+    # 2. Targeted process kill fallback
     try:
         subprocess.run(["pkill", "-f", "tray/tray_app.py"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return True
@@ -141,7 +167,11 @@ def kill_tray_process() -> bool:
 
 
 def launch_tray_process(plugin_dir: str) -> bool:
-    """Launches tray_app.py in the user's graphical desktop session."""
+    """
+    Launches tray_app.py in the user's graphical desktop session.
+    Uses 'systemd-run --user --unit=sub-deck-tray' with fallback to subprocess.Popen.
+    Ensures the tray process survives Decky session changes and desktop switching.
+    """
     script_path = os.path.join(plugin_dir, "tray", "tray_app.py")
     if not os.path.exists(script_path):
         return False
@@ -168,9 +198,38 @@ def launch_tray_process(plugin_dir: str) -> bool:
     display = os.environ.get("DISPLAY", ":0")
     wayland_display = os.environ.get("WAYLAND_DISPLAY", "wayland-0")
 
-    cmd = ["python3", script_path]
+    # 1. Try launching via systemd-run --user (prevents process termination on session changes)
+    systemd_cmd = [
+        "systemd-run",
+        "--user",
+        "--unit=sub-deck-tray",
+        f"--setenv=DISPLAY={display}",
+        f"--setenv=WAYLAND_DISPLAY={wayland_display}",
+        "python3", script_path
+    ]
 
-    # If running as root (Decky daemon), drop privileges to desktop user with clean environment
+    try:
+        if os.geteuid() == 0:
+            res = subprocess.run(
+                [
+                    "sudo", "-u", user_name,
+                    "env",
+                    f"XDG_RUNTIME_DIR=/run/user/{uid}",
+                    f"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus",
+                ] + systemd_cmd,
+                capture_output=True,
+                timeout=5
+            )
+        else:
+            res = subprocess.run(systemd_cmd, capture_output=True, timeout=5)
+
+        if res.returncode == 0:
+            return True
+    except Exception as e:
+        print(f"[SubDeckDesktop] systemd-run error, falling back to direct spawn: {e}")
+
+    # 2. Fallback to direct subprocess.Popen
+    cmd = ["python3", script_path]
     if os.geteuid() == 0:
         cmd = [
             "sudo", "-u", user_name,
@@ -190,5 +249,5 @@ def launch_tray_process(plugin_dir: str) -> bool:
         )
         return True
     except Exception as e:
-        print(f"Failed to launch tray process: {e}")
+        print(f"[SubDeckDesktop] Failed to launch tray process: {e}")
         return False
