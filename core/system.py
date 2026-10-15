@@ -60,8 +60,8 @@ def run_command(cmd_list, as_root: bool = True, timeout: Optional[float] = None)
         return None
 
 
-def get_default_gateway() -> Tuple[Optional[str], Optional[str]]:
-    """Discovers the active default gateway IP and outbound network interface."""
+def get_default_gateway(ignore_interface: Optional[str] = "tun0") -> Tuple[Optional[str], Optional[str]]:
+    """Discovers the active default gateway IP and outbound physical network interface."""
     try:
         res = subprocess.run(["ip", "route", "show", "default"], stdout=subprocess.PIPE, text=True, timeout=2)
         for line in res.stdout.splitlines():
@@ -69,6 +69,8 @@ def get_default_gateway() -> Tuple[Optional[str], Optional[str]]:
             if len(parts) >= 5 and parts[0] == "default" and parts[1] == "via":
                 gw = parts[2]
                 iface = parts[4]
+                if ignore_interface and iface == ignore_interface:
+                    continue
                 return gw, iface
     except Exception:
         pass

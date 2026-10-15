@@ -15,6 +15,7 @@ from core.constants import (
     DEFAULT_SOCKS_PORT,
     TUN_INTERFACE,
     TUN_IP_CIDR,
+    TUN_MTU,
     DNS_SERVERS,
     PRESET_DEFAULT,
     PRESET_ROSCOMVPN,
@@ -383,16 +384,16 @@ class VPNManager:
             self.stop()
             return False
 
-        # 3. Configure IP address and routing table
+        # 3. Configure IP address, MTU and link state
         run_command(["ip", "addr", "add", TUN_IP_CIDR, "dev", TUN_INTERFACE])
-        run_command(["ip", "link", "set", "dev", TUN_INTERFACE, "up"])
+        run_command(["ip", "link", "set", "dev", TUN_INTERFACE, "mtu", TUN_MTU, "up"])
 
         # Bypass route to VPN server via real default gateway to prevent routing loop
         if server_ip and gw_ip and iface:
-            run_command(["ip", "route", "add", server_ip, "via", gw_ip, "dev", iface])
+            run_command(["ip", "route", "replace", server_ip, "via", gw_ip, "dev", iface])
 
         # Route default traffic via TUN interface with top priority (metric 1)
-        run_command(["ip", "route", "add", "default", "dev", TUN_INTERFACE, "metric", "1"])
+        run_command(["ip", "route", "replace", "default", "dev", TUN_INTERFACE, "metric", "1"])
 
         # Configure systemd-resolved DNS for tun0
         run_command(["resolvectl", "dns", TUN_INTERFACE] + DNS_SERVERS)
@@ -424,11 +425,13 @@ class VPNManager:
         gw_ip = self._last_gw_ip or routing_state.get("gw_ip")
         iface = self._last_iface or routing_state.get("iface")
 
-        # 1. Rollback system routing
+        # 1. Rollback system routing & DNS
+        run_command(["resolvectl", "revert", TUN_INTERFACE])
         run_command(["ip", "route", "del", "default", "dev", TUN_INTERFACE, "metric", "1"])
         if server_ip and gw_ip and iface:
             run_command(["ip", "route", "del", server_ip, "via", gw_ip, "dev", iface])
-        run_command(["resolvectl", "revert", TUN_INTERFACE])
+        elif server_ip:
+            run_command(["ip", "route", "del", server_ip])
         run_command(["ip", "link", "delete", TUN_INTERFACE])
 
         # 2. Terminate child processes
