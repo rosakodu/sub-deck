@@ -167,6 +167,54 @@ def ensure_xray_and_tun(
     return True
 
 
+def ensure_singbox(
+    bin_dir: str,
+    singbox_path: str,
+    log_func: Optional[Callable[[str], None]] = None,
+    plugin_dir: Optional[str] = None,
+) -> bool:
+    """Ensures sing-box binary is present and executable for Hysteria 2 and TUIC protocols."""
+    if is_executable(singbox_path):
+        return True
+
+    # 1. Try copying from plugin defaults
+    if plugin_dir:
+        default_singbox = os.path.join(plugin_dir, "defaults", "bin", "sing-box")
+        if copy_from_defaults(default_singbox, singbox_path, make_executable=True):
+            if log_func:
+                log_func("sing-box binary restored from plugin defaults.")
+            return True
+
+    # 2. Remote download fallback
+    import tarfile
+    from core.constants import SINGBOX_RELEASE_URL
+    tar_path = os.path.join(bin_dir, "sing-box.tar.gz")
+    if log_func:
+        log_func("Downloading sing-box binary for Hysteria 2 / TUIC protocols...")
+    if download_file(SINGBOX_RELEASE_URL, tar_path, timeout=60.0):
+        try:
+            with tarfile.open(tar_path, "r:gz") as tar:
+                for member in tar.getmembers():
+                    if member.name.endswith("/sing-box") or member.name == "sing-box":
+                        member.name = "sing-box"
+                        tar.extract(member, path=bin_dir)
+                        break
+            os.chmod(singbox_path, 0o755)
+            if log_func:
+                log_func("sing-box downloaded and installed successfully.")
+            return True
+        except Exception as e:
+            if log_func:
+                log_func(f"Failed to unpack sing-box archive: {e}")
+        finally:
+            if os.path.exists(tar_path):
+                try:
+                    os.remove(tar_path)
+                except Exception:
+                    pass
+    return False
+
+
 def update_geofiles(
     plugin_dir: str,
     settings_dir: str,

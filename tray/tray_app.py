@@ -29,8 +29,14 @@ import dbus.mainloop.glib
 
 from tray.api_client import SubDeckApiClient
 from tray.desktop_integration import set_autostart, get_desktop_integration_status
-from core.constants import PRESET_DEFAULT, PRESET_ROSCOMVPN, SUPPORTED_SCHEMES
-from core.system import read_system_clipboard
+from core.constants import (
+    PRESET_DEFAULT,
+    PRESET_BYPASS_RU,
+    PRESET_GAMING,
+    PRESET_ROSCOMVPN,
+    SUPPORTED_SCHEMES,
+)
+from core.system import read_system_clipboard, clean_node_name
 
 
 # ─────────────────────────────────────────────────────────────
@@ -52,10 +58,18 @@ STRINGS = {
         "btn_add_manual": "✏️ Ввести URL вручную...",
         "btn_check_ping": "⚡ Проверить пинг",
         "btn_refresh_all": "🔄 Обновить все подписки",
+        "btn_generate_warp": "🌐 Сгенерировать WARP (Cloudflare)",
+        "notify_warp_generated": "Cloudflare WARP успешно сгенерирован",
+        "notify_warp_failed": "Ошибка генерации Cloudflare WARP",
         "toggle_autostart": "Автозапуск в Desktop Mode",
         "action_quit": "Выход из трея",
-        "preset_default": "Default (Весь трафик через VPN)",
-        "preset_roscomvpn": "RoscomVPN (Анти-блокировка)",
+        "preset_default": "Весь трафик",
+        "preset_bypass_ru": "Обход РФ и LAN",
+        "preset_gaming": "Игровой",
+        "preset_roscomvpn": "Roscom",
+        "btn_update_rules": "🔄 Обновить правила маршрутизации",
+        "notify_rules_updated": "Правила маршрутизации успешно обновлены",
+        "notify_rules_failed": "Ошибка обновления правил",
         "notify_connected": "VPN подключен: {node}",
         "notify_disconnected": "VPN отключен",
         "notify_sub_added": "Подписка добавлена: получено {count} серверов",
@@ -81,10 +95,18 @@ STRINGS = {
         "btn_add_manual": "✏️ Enter URL manually...",
         "btn_check_ping": "⚡ Check Ping",
         "btn_refresh_all": "🔄 Refresh All Subscriptions",
+        "btn_generate_warp": "🌐 Generate WARP (Cloudflare)",
+        "notify_warp_generated": "Cloudflare WARP successfully generated",
+        "notify_warp_failed": "Failed to generate Cloudflare WARP",
+        "btn_update_rules": "🔄 Update Routing Rules",
+        "notify_rules_updated": "Routing rules successfully updated",
+        "notify_rules_failed": "Failed to update routing rules",
         "toggle_autostart": "Autostart in Desktop Mode",
         "action_quit": "Exit Tray",
-        "preset_default": "Default (All traffic via VPN)",
-        "preset_roscomvpn": "RoscomVPN (Bypass Censorship)",
+        "preset_default": "All Traffic",
+        "preset_bypass_ru": "Bypass RU and LAN",
+        "preset_gaming": "Gaming",
+        "preset_roscomvpn": "Roscom",
         "notify_connected": "VPN Connected: {node}",
         "notify_disconnected": "VPN Disconnected",
         "notify_sub_added": "Subscription added: {count} servers found",
@@ -618,12 +640,20 @@ class SubDeckTrayApp:
             )))
         else:
             for node in nodes:
-                name = node.get("name", "Server")
-                proto = (node.get("type") or "vless").upper()
+                name = clean_node_name(node.get("name", "Server"))
+
+                raw_type = (node.get("type") or "").lower()
+                is_balancer = raw_type in ("auto_balancer", "balancer")
+
                 key = f"{node.get('server')}:{node.get('port')}"
                 ping_val = self.ping_map.get(key)
 
-                label = f"{name} [{proto}]"
+                if is_balancer:
+                    label = name
+                else:
+                    proto = (node.get("type") or "vless").upper()
+                    label = f"{name} [{proto}]"
+
                 if ping_val is not None:
                     label += f" • {ping_val}ms"
 
@@ -698,6 +728,18 @@ class SubDeckTrayApp:
             dbus.Array([], signature=dbus.Signature('v'))
         )))
 
+        # Generate WARP
+        warp_act_id = self._register_action(self._generate_warp)
+        subs_children.append(dbus.Struct((
+            dbus.Int32(warp_act_id),
+            dbus.Dictionary({
+                dbus.String('label'): dbus.String(tr("btn_generate_warp")),
+                dbus.String('enabled'): dbus.Boolean(True),
+                dbus.String('visible'): dbus.Boolean(True),
+            }, signature=dbus.Signature('sv')),
+            dbus.Array([], signature=dbus.Signature('v'))
+        )))
+
         subs_children.append(dbus.Struct((
             dbus.Int32(21),
             dbus.Dictionary({
@@ -766,25 +808,40 @@ class SubDeckTrayApp:
         preset_children: List[dbus.Struct] = []
         current_preset = status.get("selected_preset", PRESET_DEFAULT)
 
-        def_prefix = "✔ " if current_preset == PRESET_DEFAULT else ""
-        ros_prefix = "✔ " if current_preset == PRESET_ROSCOMVPN else ""
+        for pr_key, pr_str in [
+            (PRESET_DEFAULT, "preset_default"),
+            (PRESET_BYPASS_RU, "preset_bypass_ru"),
+            (PRESET_GAMING, "preset_gaming"),
+            (PRESET_ROSCOMVPN, "preset_roscomvpn"),
+        ]:
+            prefix = "✔ " if current_preset == pr_key else ""
+            act_id = self._register_action(lambda p=pr_key: self._set_preset(p))
+            preset_children.append(dbus.Struct((
+                dbus.Int32(act_id),
+                dbus.Dictionary({
+                    dbus.String('label'): dbus.String(f"{prefix}{tr(pr_str)}"),
+                    dbus.String('enabled'): dbus.Boolean(True),
+                    dbus.String('visible'): dbus.Boolean(True),
+                }, signature=dbus.Signature('sv')),
+                dbus.Array([], signature=dbus.Signature('v'))
+            )))
 
-        def_act_id = self._register_action(lambda: self._set_preset(PRESET_DEFAULT))
+        # Separator inside preset submenu
         preset_children.append(dbus.Struct((
-            dbus.Int32(def_act_id),
+            dbus.Int32(31),
             dbus.Dictionary({
-                dbus.String('label'): dbus.String(f"{def_prefix}{tr('preset_default')}"),
-                dbus.String('enabled'): dbus.Boolean(True),
+                dbus.String('type'): dbus.String('separator'),
                 dbus.String('visible'): dbus.Boolean(True),
             }, signature=dbus.Signature('sv')),
             dbus.Array([], signature=dbus.Signature('v'))
         )))
 
-        ros_act_id = self._register_action(lambda: self._set_preset(PRESET_ROSCOMVPN))
+        # Update Throne rules action
+        update_rules_id = self._register_action(self._update_rules)
         preset_children.append(dbus.Struct((
-            dbus.Int32(ros_act_id),
+            dbus.Int32(update_rules_id),
             dbus.Dictionary({
-                dbus.String('label'): dbus.String(f"{ros_prefix}{tr('preset_roscomvpn')}"),
+                dbus.String('label'): dbus.String(tr("btn_update_rules")),
                 dbus.String('enabled'): dbus.Boolean(True),
                 dbus.String('visible'): dbus.Boolean(True),
             }, signature=dbus.Signature('sv')),
@@ -871,6 +928,46 @@ class SubDeckTrayApp:
         def _worker():
             self.client.set_preset(preset)
             time.sleep(0.3)
+            self._trigger_background_poll()
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _update_rules(self):
+        def _worker():
+            res = self.client.update_routing_presets()
+            time.sleep(0.3)
+            if res and res.get("success"):
+                GLib.idle_add(
+                    self._send_desktop_notification,
+                    tr("notify_rules_updated"),
+                    tr("notify_rules_updated"),
+                )
+            else:
+                err = res.get("error", "Unknown error") if res else "Unknown error"
+                GLib.idle_add(
+                    self._send_desktop_notification,
+                    tr("notify_rules_failed"),
+                    f"{tr('notify_rules_failed')}: {err}",
+                )
+            self._trigger_background_poll()
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _generate_warp(self):
+        def _worker():
+            res = self.client.generate_warp_node()
+            time.sleep(0.3)
+            if res and res.get("success"):
+                GLib.idle_add(
+                    self._send_desktop_notification,
+                    tr("notify_warp_generated"),
+                    tr("notify_warp_generated"),
+                )
+            else:
+                err = res.get("error", "Unknown error") if res else "Unknown error"
+                GLib.idle_add(
+                    self._send_desktop_notification,
+                    tr("notify_warp_failed"),
+                    f"{tr('notify_warp_failed')}: {err}",
+                )
             self._trigger_background_poll()
         threading.Thread(target=_worker, daemon=True).start()
 

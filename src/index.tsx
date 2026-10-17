@@ -45,7 +45,12 @@ const getClipboard = callable<[], string>("get_clipboard");
 const getDesktopStatus = callable<[], { installed: boolean; autostart: boolean; enabled?: boolean }>("get_desktop_status");
 const setDesktopAutostart = callable<[enable: boolean], boolean>("set_desktop_autostart");
 
-
+const PRESET_OPTIONS: Array<{ key: string; labelKey: TranslationKeys }> = [
+  { key: "default", labelKey: "presetDefault" },
+  { key: "bypass_ru", labelKey: "presetBypassRu" },
+  { key: "gaming", labelKey: "presetGaming" },
+  { key: "roscomvpn", labelKey: "presetRoscom" },
+];
 
 function unwrap<T>(payload: any): T {
   return payload && typeof payload === "object" && "result" in payload
@@ -386,7 +391,9 @@ function Content() {
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
               <span style={{ fontSize: "11px", fontWeight: "bold", color: "#a5a5a5", textTransform: "uppercase", letterSpacing: "0.5px" }}>
-                {t("presetLabel")}
+                {t("presetLabel")}: <span style={{ color: "#1a9fff", fontWeight: "normal", textTransform: "none" }}>
+                  {t((PRESET_OPTIONS.find((p) => p.key === preset)?.labelKey || "presetDefault") as TranslationKeys)}
+                </span>
               </span>
               <span style={{ fontSize: "10px", color: "#888" }}>
                 {presetExpanded ? "▼" : "▶"}
@@ -397,57 +404,47 @@ function Content() {
 
         {presetExpanded && (
           <>
-            <PanelSectionRow>
-              <div style={{ position: "relative", width: "100%" }}>
-                <ButtonItem
-                  layout="below"
-                  onClick={() => { handlePresetChange("default", t("presetDefault")); setPresetExpanded(false); }}
-                >
-                  <div style={{ fontWeight: preset === "default" ? "bold" : "normal", color: preset === "default" ? "#1a9fff" : "inherit" }}>
-                    {t("presetDefault")}
+            {PRESET_OPTIONS.map((item) => {
+              const isSelected = preset === item.key;
+              const label = t(item.labelKey);
+              return (
+                <PanelSectionRow key={item.key}>
+                  <div style={{ position: "relative", width: "100%" }}>
+                    <ButtonItem
+                      layout="below"
+                      onClick={() => {
+                        handlePresetChange(item.key, label);
+                        setPresetExpanded(false);
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontWeight: isSelected ? "bold" : "normal",
+                          color: isSelected ? "#1a9fff" : "inherit",
+                        }}
+                      >
+                        {label}
+                      </div>
+                    </ButtonItem>
+                    {isSelected && (
+                      <div
+                        style={{
+                          position: "absolute",
+                          top: 0,
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          border: "1.5px solid #1a9fff",
+                          borderRadius: "4px",
+                          pointerEvents: "none",
+                          backgroundColor: "rgba(26, 159, 255, 0.1)",
+                        }}
+                      />
+                    )}
                   </div>
-                </ButtonItem>
-                {preset === "default" && (
-                  <div style={{
-                    position: "absolute",
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    border: "1.5px solid #1a9fff",
-                    borderRadius: "4px",
-                    pointerEvents: "none",
-                    backgroundColor: "rgba(26, 159, 255, 0.1)"
-                  }} />
-                )}
-              </div>
-            </PanelSectionRow>
-
-            <PanelSectionRow>
-              <div style={{ position: "relative", width: "100%" }}>
-                <ButtonItem
-                  layout="below"
-                  onClick={() => { handlePresetChange("roscomvpn", t("presetRoscom")); setPresetExpanded(false); }}
-                >
-                  <div style={{ fontWeight: preset === "roscomvpn" ? "bold" : "normal", color: preset === "roscomvpn" ? "#1a9fff" : "inherit" }}>
-                    {t("presetRoscom")}
-                  </div>
-                </ButtonItem>
-                {preset === "roscomvpn" && (
-                  <div style={{
-                    position: "absolute",
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    border: "1.5px solid #1a9fff",
-                    borderRadius: "4px",
-                    pointerEvents: "none",
-                    backgroundColor: "rgba(26, 159, 255, 0.1)"
-                  }} />
-                )}
-              </div>
-            </PanelSectionRow>
+                </PanelSectionRow>
+              );
+            })}
           </>
         )}
       </PanelSection>

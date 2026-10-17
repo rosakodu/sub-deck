@@ -60,6 +60,8 @@ export type TranslationKeys =
   | "updateBtn"
   | "presetLabel"
   | "presetDefault"
+  | "presetBypassRu"
+  | "presetGaming"
   | "presetRoscom"
   | "addFreeBtn"
   | "loadedNodesForSub"

@@ -14,7 +14,7 @@ import decky
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from core.constants import FREE_SUBSCRIPTIONS, PRESET_ROSCOMVPN
-from core.system import get_user_home, read_system_clipboard
+from core.system import get_user_home, read_system_clipboard, get_default_gateway
 from core.server import SubDeckApiServer
 from tray.desktop_integration import (
     set_autostart,
@@ -32,6 +32,7 @@ class Plugin:
         self.loop = None
         self.vpn = None
         self.update_task = None
+        self.sleep_task = None
         self.api_server = None
 
     async def _main(self):
@@ -50,8 +51,36 @@ class Plugin:
         self.vpn = VPNManager(plugin_dir, settings_dir, logger=decky.logger)
         decky.logger.info(f"sub-deck loaded. settings_dir={settings_dir}")
 
-        # Start background update daemon
+        # Clean up any stale interfaces or processes from ungraceful shutdown
+        try:
+            await self.loop.run_in_executor(None, self.vpn.cleanup_stale)
+        except Exception as e:
+            decky.logger.warning(f"Error during stale cleanup: {e}")
+
+        try:
+            bin_exts = {".sh", ""}
+            for root, dirs, files in os.walk(plugin_dir):
+                for d in dirs:
+                    try:
+                        os.chmod(os.path.join(root, d), 0o755)
+                    except Exception:
+                        pass
+                for f in files:
+                    fpath = os.path.join(root, f)
+                    try:
+                        _, ext = os.path.splitext(f)
+                        if (ext in bin_exts and os.path.isfile(fpath)) or root.endswith("/bin"):
+                            os.chmod(fpath, 0o755)
+                        else:
+                            os.chmod(fpath, 0o644)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        # Start background workers (subscription updates and sleep/wake monitor)
         self.update_task = asyncio.create_task(self._auto_update_loop())
+        self.sleep_task = asyncio.create_task(self._sleep_monitor_loop())
 
         # Start local IPC API server for Desktop Mode tray integration
         self.api_server = SubDeckApiServer(self, logger=decky.logger)
@@ -105,9 +134,22 @@ class Plugin:
         settings = self.vpn.load_settings()
         settings["selected_preset"] = preset
         self.vpn.save_settings(settings)
-        if preset == PRESET_ROSCOMVPN:
+        if preset in (PRESET_ROSCOMVPN, "bypass_ru"):
             await self.loop.run_in_executor(None, self.vpn.update_geofiles, False)
+        # If VPN is actively running, hot-restart with new preset routing rules
+        if self.vpn.is_running():
+            node = settings.get("selected_node")
+            if node:
+                await self.loop.run_in_executor(None, self.vpn.start, node)
         return True
+
+    async def update_routing_presets(self) -> dict:
+        """Downloads and atomically updates Throne routing presets and geofiles."""
+        return await self.loop.run_in_executor(None, self.vpn.update_routing_presets)
+
+    async def generate_warp_node(self) -> dict:
+        """Registers/generates Cloudflare WARP WireGuard profile."""
+        return await self.loop.run_in_executor(None, self.vpn.generate_warp_node, True)
 
     async def get_steam_language(self) -> str:
         """Discovers active Steam language from registry.vdf."""
@@ -169,9 +211,11 @@ class Plugin:
                 return f"--- No {label} logs found ---"
 
             xray_log_path = os.path.join(self.vpn.settings_dir, "xray.log")
+            singbox_log_path = os.path.join(self.vpn.settings_dir, "singbox.log")
             tun_log_path = os.path.join(self.vpn.settings_dir, "tun2socks.log")
 
             xray_logs = _read_tail(xray_log_path, "xray")
+            singbox_logs = _read_tail(singbox_log_path, "singbox")
             tun_logs = _read_tail(tun_log_path, "tun2socks")
 
             combined = (
@@ -179,6 +223,8 @@ class Plugin:
                 f"{plugin_logs}\n\n"
                 "=== XRAY CORE LOGS ===\n"
                 f"{xray_logs}\n\n"
+                "=== SING-BOX CORE LOGS ===\n"
+                f"{singbox_logs}\n\n"
                 "=== TUN2SOCKS LOGS ===\n"
                 f"{tun_logs}\n"
             )
@@ -234,23 +280,15 @@ class Plugin:
 
             last_update = last_updates.get(url, 0)
             if now - last_update >= interval_hours * 3600:
-                decky.logger.info(f"Auto-updating subscription: {url} (interval: {interval_hours}h)")
                 try:
-                    _, interval = await self.loop.run_in_executor(
-                        None, self.vpn.parse_subscription, url
+                    await self.loop.run_in_executor(
+                        None, self.vpn.update_subscription, url
                     )
-                    last_updates[url] = now
-                    if interval is not None:
-                        intervals[url] = int(interval)
                     updated_any = True
                 except Exception as e:
                     decky.logger.error(f"Failed to auto-update subscription {url}: {e}")
 
         if updated_any:
-            settings["last_update_times"] = last_updates
-            settings["update_intervals"] = intervals
-            self.vpn.save_settings(settings)
-            await self.loop.run_in_executor(None, self.vpn.parse_all_subscriptions)
             decky.logger.info("Subscriptions auto-updated successfully.")
 
     async def _auto_update_loop(self) -> None:
@@ -265,6 +303,43 @@ class Plugin:
             except Exception as e:
                 decky.logger.error(f"Auto update loop error: {e}")
             await asyncio.sleep(900)
+
+    async def _sleep_monitor_loop(self) -> None:
+        """Monitors system sleep/resume events and seamlessly restores VPN connectivity."""
+        last_tick = time.monotonic()
+        while True:
+            try:
+                await asyncio.sleep(3)
+                now = time.monotonic()
+                delta = now - last_tick
+                last_tick = now
+
+                # If loop interval exceeded 8 seconds, system was suspended/slept
+                if delta > 8.0:
+                    decky.logger.info(f"Steam Deck resume detected (suspend delta ~{delta:.1f}s)")
+                    if self.vpn and self.vpn.is_running():
+                        decky.logger.info("VPN was active before sleep. Waiting for Wi-Fi / network gateway...")
+                        settings = self.vpn.load_settings()
+                        node = settings.get("selected_node")
+
+                        # Wait up to 10 seconds (20 iterations of 0.5s) for network gateway
+                        gw, iface = None, None
+                        for _ in range(20):
+                            await asyncio.sleep(0.5)
+                            gw, iface = get_default_gateway()
+                            if gw and iface:
+                                break
+
+                        if node and gw and iface:
+                            decky.logger.info(f"Network restored ({iface} via {gw}). Re-establishing tunnel...")
+                            await self.loop.run_in_executor(None, self.vpn.start, node)
+                        else:
+                            decky.logger.warning("No network detected after resume. Tearing down stale tunnel to prevent routing lock.")
+                            await self.loop.run_in_executor(None, self.vpn.stop)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                decky.logger.error(f"Error in sleep monitor: {e}")
 
     async def get_desktop_status(self) -> dict:
         """Returns desktop tray integration status."""
@@ -304,6 +379,8 @@ class Plugin:
                 decky.logger.error(f"Error stopping API server: {e}")
         if self.update_task:
             self.update_task.cancel()
+        if self.sleep_task:
+            self.sleep_task.cancel()
         if self.vpn:
             await self.loop.run_in_executor(None, self.vpn.stop)
         decky.logger.info("sub-deck unloaded")
@@ -314,6 +391,10 @@ class Plugin:
                 await self.api_server.stop()
             except Exception as e:
                 pass
+        if self.update_task:
+            self.update_task.cancel()
+        if self.sleep_task:
+            self.sleep_task.cancel()
         if self.vpn:
             await self.loop.run_in_executor(None, self.vpn.stop)
         # Also remove autostart and kill tray process when uninstalled

@@ -258,3 +258,22 @@ def read_system_clipboard() -> str:
         pass
 
     return ""
+
+
+_BALANCER_BRACKET_RE = re.compile(
+    r'\s*[\(\[](leastping|least_ping|автобалансер|авто-балансер)[\)\]]',
+    re.IGNORECASE
+)
+_BALANCER_WORD_RE = re.compile(
+    r'\s+(автобалансер|авто-балансер)',
+    re.IGNORECASE
+)
+
+
+def clean_node_name(name: str) -> str:
+    """Removes auto-balancer markers and extra whitespace from node names."""
+    if not name:
+        return ""
+    clean = _BALANCER_BRACKET_RE.sub("", name)
+    clean = _BALANCER_WORD_RE.sub("", clean).strip()
+    return clean or name

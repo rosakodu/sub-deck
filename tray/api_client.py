@@ -94,9 +94,24 @@ class SubDeckApiClient:
         return bool(res and res.get("success"))
 
     def set_preset(self, preset: str) -> bool:
-        """Sets the active routing preset (default or roscomvpn)."""
+        """Sets the active routing preset (default, bypass_ru, gaming, roscomvpn)."""
         res = self._request("POST", "/preset", {"preset": preset})
         return bool(res and res.get("success"))
+
+    def get_presets(self) -> List[Dict[str, Any]]:
+        """Fetches available routing presets."""
+        res = self._request("GET", "/presets")
+        return res.get("presets", []) if res else []
+
+    def update_routing_presets(self) -> Dict[str, Any]:
+        """Updates Throne routing presets and geofiles."""
+        res = self._request("POST", "/presets/update", timeout=60.0)
+        return res or {"success": False, "error": "Request failed"}
+
+    def real_ping(self, url: Optional[str] = None) -> int:
+        """Measures end-to-end HTTP 204 real delay through active connection."""
+        res = self._request("POST", "/ping/real", {"url": url} if url else {})
+        return res.get("delay_ms", -1) if res else -1
 
     def ping_nodes(self) -> List[Dict[str, Any]]:
         """Runs TCP latency check on candidate nodes."""
@@ -114,3 +129,8 @@ class SubDeckApiClient:
         """Toggles desktop autostart."""
         res = self._request("POST", "/desktop/autostart", {"enable": enable})
         return bool(res and res.get("success"))
+
+    def generate_warp_node(self) -> Dict[str, Any]:
+        """Registers/generates Cloudflare WARP profile."""
+        res = self._request("POST", "/warp/generate", timeout=20.0)
+        return res or {"success": False, "error": "Request failed"}

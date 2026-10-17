@@ -56,3 +56,5 @@ cli/
 cli/*
 cli/decky
 defaults/bin/
+open_projacktor.sh
+*.zip

@@ -160,7 +160,7 @@ def kill_tray_process() -> bool:
 
     # 2. Targeted process kill fallback
     try:
-        subprocess.run(["pkill", "-f", "tray/tray_app.py"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["pkill", "-f", "sub-deck/tray/tray_app.py"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return True
     except Exception:
         return False
@@ -178,7 +178,7 @@ def launch_tray_process(plugin_dir: str) -> bool:
 
     # Check if already running
     try:
-        res = subprocess.run(["pgrep", "-f", "tray/tray_app.py"], stdout=subprocess.PIPE)
+        res = subprocess.run(["pgrep", "-f", "sub-deck/tray/tray_app.py"], stdout=subprocess.PIPE)
         if res.returncode == 0 and res.stdout.strip():
             return True
     except Exception:

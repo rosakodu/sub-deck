@@ -250,6 +250,42 @@ def parse_hysteria2_link(link: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def parse_tuic_link(link: str) -> Optional[Dict[str, Any]]:
+    """Parses a tuic:// URI."""
+    try:
+        parsed = urllib.parse.urlparse(link)
+        netloc = parsed.netloc
+        if "@" not in netloc:
+            return None
+        auth, endpoint = netloc.split("@", 1)
+        uuid = auth
+        password = ""
+        if ":" in auth:
+            uuid, password = auth.split(":", 1)
+        host, port = parse_endpoint(endpoint)
+        query = urllib.parse.parse_qs(parsed.query)
+        params = {k: v[0] for k, v in query.items()}
+        name = urllib.parse.unquote(parsed.fragment) if parsed.fragment else f"TUIC {host}:{port}"
+
+        insecure = params.get("allow_insecure", "0") in ("1", "true")
+
+        return {
+            "type": "tuic",
+            "name": name,
+            "server": host,
+            "port": port,
+            "uuid": uuid,
+            "password": password,
+            "security": "tls",
+            "sni": params.get("sni", ""),
+            "alpn": params.get("alpn", "h3"),
+            "congestion_control": params.get("congestion_control", "bbr"),
+            "insecure": insecure,
+        }
+    except Exception:
+        return None
+
+
 def parse_clash_proxy(proxy: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Converts a Clash/Mihomo YAML proxy dict into sub-deck internal node structure."""
     if not isinstance(proxy, dict):
@@ -380,7 +416,89 @@ def parse_clash_proxy(proxy: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             "obfs_password": obfs_pass,
         }
 
+    elif proto == "tuic":
+        uuid = str(proxy.get("uuid", ""))
+        password = str(proxy.get("password", ""))
+        sni = str(proxy.get("sni") or "")
+        insecure = bool(proxy.get("skip-cert-verify", False))
+        congestion_control = str(proxy.get("congestion-controller", "bbr"))
+        return {
+            "type": "tuic",
+            "name": name,
+            "server": server,
+            "port": port,
+            "uuid": uuid,
+            "password": password,
+            "security": "tls",
+            "sni": sni,
+            "insecure": insecure,
+            "congestion_control": congestion_control,
+        }
+
     return None
+
+
+def parse_xray_json_nodes(content: bytes) -> List[Dict[str, Any]]:
+    """Extracts nodes and smart balancers from Happ / Xray / Sing-box JSON array subscription payload."""
+    try:
+        raw_text = content.decode("utf-8", errors="replace").strip()
+        data = json.loads(raw_text)
+        if not isinstance(data, list):
+            return []
+
+        nodes = []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            remarks = item.get("remarks") or item.get("name") or "Proxy"
+            outbounds = item.get("outbounds", [])
+            balancers = item.get("routing", {}).get("balancers", [])
+            is_balancer = len(balancers) > 0 or len([o for o in outbounds if o.get("tag") in ("proxy", "proxy-2")]) > 1
+
+            server = ""
+            port = 443
+            proto = "balancer" if is_balancer else "vless"
+
+            proxy_obs = [
+                o for o in outbounds
+                if o.get("tag") in ("proxy", "proxy-2")
+                or "vnext" in o.get("settings", {})
+                or "servers" in o.get("settings", {})
+            ]
+            if proxy_obs:
+                p0 = proxy_obs[0]
+                if not is_balancer:
+                    proto = p0.get("protocol", "vless")
+                vnext = p0.get("settings", {}).get("vnext", [])
+                if vnext:
+                    server = str(vnext[0].get("address", ""))
+                    port = int(vnext[0].get("port", 443))
+                else:
+                    servers = p0.get("settings", {}).get("servers", [])
+                    if servers:
+                        server = str(servers[0].get("address", ""))
+                        port = int(servers[0].get("port", 443))
+
+            # For balancers with multiple outbounds, pick the TCP/Reality endpoint for ping if available
+            if is_balancer and len(proxy_obs) > 1:
+                for ob in proxy_obs:
+                    if ob.get("streamSettings", {}).get("network") == "tcp":
+                        vnext = ob.get("settings", {}).get("vnext", [])
+                        if vnext:
+                            server = str(vnext[0].get("address", server))
+                            port = int(vnext[0].get("port", port))
+                            break
+
+            nodes.append({
+                "type": proto,
+                "name": remarks,
+                "server": server,
+                "port": port,
+                "raw_config": item,
+            })
+        return nodes
+    except Exception:
+        return []
 
 
 def parse_clash_yaml_nodes(content: bytes) -> List[Dict[str, Any]]:
@@ -415,6 +533,8 @@ def parse_node_link(link: str) -> Optional[Dict[str, Any]]:
         return parse_ss_link(line)
     if line.startswith("hysteria2://") or line.startswith("hy2://"):
         return parse_hysteria2_link(line)
+    if line.startswith("tuic://"):
+        return parse_tuic_link(line)
     return None
 
 
@@ -563,33 +683,39 @@ def parse_subscription_nodes(url: str, log_func=None) -> Tuple[List[Dict[str, An
     if filename:
         metadata["name"] = filename
 
-    # Check if subscription is a Clash / Mihomo YAML payload
-    yaml_nodes = parse_clash_yaml_nodes(content)
+    # 1. Check if subscription is an Xray / Happ JSON array payload
+    json_nodes = parse_xray_json_nodes(content)
     raw_nodes = []
-    if yaml_nodes:
-        for node in yaml_nodes:
+    if json_nodes:
+        if log_func:
+            log_func(f"Detected Happ/Xray JSON payload with {len(json_nodes)} configurations.")
+        for node in json_nodes:
             node["subscription_url"] = url
             raw_nodes.append(node)
     else:
-        lines = decode_subscription_lines(content)
-        for line in lines:
-            node = parse_node_link(line)
-            if node:
+        # 2. Check if subscription is a Clash / Mihomo YAML payload
+        yaml_nodes = parse_clash_yaml_nodes(content)
+        if yaml_nodes:
+            for node in yaml_nodes:
                 node["subscription_url"] = url
                 raw_nodes.append(node)
+        else:
+            # 3. Plain text or base64 links
+            lines = decode_subscription_lines(content)
+            for line in lines:
+                node = parse_node_link(line)
+                if node:
+                    node["subscription_url"] = url
+                    raw_nodes.append(node)
 
-    # Deduplicate nodes by (name, server, port)
+    # Deduplicate nodes by name
     seen_names = set()
-    seen_endpoints = set()
     unique_nodes = []
     for node in raw_nodes:
         name = node.get("name")
-        endpoint = (node.get("server"), node.get("port"))
-        if name and endpoint[0] and endpoint[1]:
-            if name not in seen_names and endpoint not in seen_endpoints:
-                seen_names.add(name)
-                seen_endpoints.add(endpoint)
-                unique_nodes.append(node)
+        if name and name not in seen_names:
+            seen_names.add(name)
+            unique_nodes.append(node)
 
     if log_func:
         log_func(f"Parsed {len(unique_nodes)} unique nodes for {url}")

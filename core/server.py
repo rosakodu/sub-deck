@@ -10,7 +10,7 @@ import asyncio
 from typing import Any, Dict, Optional, Callable
 from urllib.parse import urlparse
 
-from core.constants import IPC_HOST, IPC_PORT, IPC_SOCKET_PATH
+from core.constants import IPC_HOST, IPC_PORT, IPC_SOCKET_PATH, PLUGIN_VERSION
 from core.pinger import check_nodes_ping
 from core.system import get_user_home
 
@@ -189,7 +189,7 @@ class SubDeckApiServer:
                 "selected_node": settings.get("selected_node"),
                 "selected_preset": settings.get("selected_preset", "default"),
                 "subscriptions_count": len(settings.get("subscriptions", [])),
-                "version": "1.1.3",
+                "version": PLUGIN_VERSION,
             }
 
         # ── GET /api/nodes ──
@@ -254,38 +254,113 @@ class SubDeckApiServer:
             nodes = await self.plugin.loop.run_in_executor(None, vpn.parse_all_subscriptions)
             return 200, {"success": True, "nodes_count": len(nodes)}
 
+        # ── GET /api/presets ──
+        if method == "GET" and path == "/api/presets":
+            return 200, {
+                "presets": [
+                    {
+                        "id": "default",
+                        "name": "Весь трафик",
+                        "description": "Весь сетевой трафик направляется через прокси.",
+                    },
+                    {
+                        "id": "bypass_ru",
+                        "name": "Обход РФ и LAN",
+                        "description": "Российские сайты, банки, сервисы и локальная сеть идут напрямую на макс. скорости, остальное через прокси.",
+                    },
+                    {
+                        "id": "gaming",
+                        "name": "Игровой",
+                        "description": "Загрузка игр Steam/Epic/EA/Blizzard и CDN идут напрямую без нагрузки на прокси, а заблокированные сайты через VPN.",
+                    },
+                    {
+                        "id": "roscomvpn",
+                        "name": "Roscom",
+                        "description": "Только заблокированные в реестре РКН ресурсы идут через прокси, остальной трафик напрямую.",
+                    },
+                ]
+            }
+
         # ── POST /api/preset ──
         if method == "POST" and path == "/api/preset":
             preset = data.get("preset", "default")
             await self.plugin.save_preset(preset)
             return 200, {"success": True, "preset": preset}
 
+        # ── POST /api/presets/update & download ──
+        if method == "POST" and path in ("/api/presets/update", "/api/presets/download"):
+            res = await self.plugin.update_routing_presets()
+            return 200, res
+
+        # ── POST /api/warp/generate ──
+        if method == "POST" and path == "/api/warp/generate":
+            force = bool(data.get("force", True))
+            res = await self.plugin.generate_warp_node()
+            return 200, res
+
+        # ── GET /api/warp/status ──
+        if method == "GET" and path == "/api/warp/status":
+            from core.warp_generator import get_warp_identity_path
+            path_file = get_warp_identity_path(vpn.settings_dir)
+            exists = os.path.exists(path_file)
+            return 200, {"generated": exists}
+
         # ── POST /api/ping ──
         if method == "POST" and path == "/api/ping":
             nodes = vpn.get_nodes()
             alive_nodes = await self.plugin.loop.run_in_executor(
-                None, lambda: check_nodes_ping(nodes, timeout=1.2)
+                None, lambda: check_nodes_ping(nodes, timeout=1.5)
             )
             return 200, {"nodes": alive_nodes}
 
+        # ── POST /api/ping/real ──
+        if method == "POST" and path == "/api/ping/real":
+            from core.pinger import http_url_test
+            url = data.get("url")
+            delay = await self.plugin.loop.run_in_executor(
+                None, lambda: http_url_test(url=url, timeout=3.5)
+            )
+            return 200, {"success": delay > 0, "delay_ms": delay}
+
         # ── GET /api/desktop/status ──
         if method == "GET" and path == "/api/desktop/status":
-            from tray.desktop_integration import get_desktop_integration_status
-            status = get_desktop_integration_status(self.plugin.vpn.plugin_dir)
+            status = await self.plugin.get_desktop_status()
             return 200, status
 
         # ── POST /api/desktop/autostart ──
         if method == "POST" and path == "/api/desktop/autostart":
             enable = bool(data.get("enable", True))
-            from tray.desktop_integration import set_autostart
-            success = set_autostart(self.plugin.vpn.plugin_dir, enable)
+            success = await self.plugin.set_desktop_autostart(enable)
             return 200, {"success": success, "autostart": enable}
 
-        # ── POST /api/desktop/launch ──
-        if method == "POST" and path == "/api/desktop/launch":
-            from tray.desktop_integration import launch_tray_process
-            success = launch_tray_process(self.plugin.vpn.plugin_dir)
-            return 200, {"success": success}
+        # ── POST /api/reload ──
+        if method == "POST" and path == "/api/reload":
+            try:
+                import importlib
+                import core.constants
+                import core.system
+                import core.binaries
+                import core.singbox_config
+                import core.xray_config
+                import core.parsers
+                import core.pinger
+                import vpn_manager
+                importlib.reload(core.constants)
+                importlib.reload(core.system)
+                importlib.reload(core.binaries)
+                importlib.reload(core.singbox_config)
+                importlib.reload(core.xray_config)
+                importlib.reload(core.parsers)
+                importlib.reload(core.pinger)
+                importlib.reload(vpn_manager)
+                self.plugin.vpn = vpn_manager.VPNManager(
+                    self.plugin.vpn.plugin_dir,
+                    self.plugin.vpn.settings_dir,
+                    logger=self.logger
+                )
+                return 200, {"success": True}
+            except Exception as e:
+                return 500, {"error": str(e)}
 
         return 404, {"error": f"Endpoint not found: {method} {path}"}
 
