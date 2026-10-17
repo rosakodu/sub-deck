@@ -78,12 +78,10 @@ chmod 755 "$STAGING_DIR/sub-deck/defaults/bin/"* 2>/dev/null || true
 
 # 7. Упаковка в zip
 echo "==> 6. Упаковка zip-архива..."
-RELEASE_ZIP="$OUT_DIR/sub-deck-v${VERSION}.zip"
-LATEST_ZIP="$OUT_DIR/sub-deck.zip"
+RELEASE_ZIP="$OUT_DIR/sub-deck.zip"
 
-rm -f "$RELEASE_ZIP" "$LATEST_ZIP"
+rm -f "$RELEASE_ZIP" "$OUT_DIR/sub-deck-v"*.zip 2>/dev/null || true
 (cd "$STAGING_DIR" && zip -r -9 "$RELEASE_ZIP" sub-deck)
-cp "$RELEASE_ZIP" "$LATEST_ZIP"
 
 # 8. Контрольная сумма SHA256
 SHA256=$(sha256sum "$RELEASE_ZIP" | cut -d' ' -f1)
@@ -91,6 +89,5 @@ SHA256=$(sha256sum "$RELEASE_ZIP" | cut -d' ' -f1)
 echo "======================================================="
 echo "  [✓] Релиз успешно собран!"
 echo "  Файл:   $RELEASE_ZIP ($(du -h "$RELEASE_ZIP" | cut -f1))"
-echo "  Alias:  $LATEST_ZIP"
 echo "  SHA256: $SHA256"
 echo "======================================================="
