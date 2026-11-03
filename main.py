@@ -6,9 +6,16 @@ Acts as an asynchronous RPC bridge between the React frontend and core engine.
 import os
 import sys
 import re
+import shutil
 import asyncio
 import time
-import decky
+try:
+    import decky
+except ImportError:
+    import types
+    import logging
+    decky = types.ModuleType("decky")
+    decky.logger = logging.getLogger("sub-deck")
 
 # Ensure plugin directory is in sys.path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -23,6 +30,41 @@ from tray.desktop_integration import (
     kill_tray_process,
 )
 from vpn_manager import VPNManager
+
+
+def resolve_and_migrate_settings_dir(logger=None) -> str:
+    """
+    Resolves settings directory according to Decky standards and migrates
+    legacy ~/.config/sub-deck files if necessary.
+    """
+    legacy_dir = os.path.join(get_user_home(), ".config", "sub-deck")
+    target_dir = (
+        getattr(decky, "DECKY_PLUGIN_SETTINGS_DIR", None)
+        or os.environ.get("DECKY_PLUGIN_SETTINGS_DIR")
+        or legacy_dir
+    )
+    os.makedirs(target_dir, exist_ok=True)
+
+    # Migrate files from legacy directory if target_dir is different
+    if os.path.abspath(target_dir) != os.path.abspath(legacy_dir) and os.path.isdir(legacy_dir):
+        try:
+            for item in os.listdir(legacy_dir):
+                src = os.path.join(legacy_dir, item)
+                dst = os.path.join(target_dir, item)
+                if not os.path.exists(dst):
+                    if os.path.isfile(src):
+                        shutil.copy2(src, dst)
+                        if logger:
+                            logger.info(f"Migrated {item} from {legacy_dir} to {target_dir}")
+                    elif os.path.isdir(src):
+                        shutil.copytree(src, dst)
+                        if logger:
+                            logger.info(f"Migrated directory {item} from {legacy_dir} to {target_dir}")
+        except Exception as e:
+            if logger:
+                logger.warning(f"Error migrating legacy settings from {legacy_dir}: {e}")
+
+    return target_dir
 
 
 class Plugin:
@@ -43,10 +85,7 @@ class Plugin:
             "DECKY_PLUGIN_DIR",
             os.path.dirname(os.path.abspath(__file__))
         )
-        settings_dir = os.environ.get(
-            "DECKY_PLUGIN_SETTINGS_DIR",
-            os.path.join(get_user_home(), ".config", "sub-deck")
-        )
+        settings_dir = resolve_and_migrate_settings_dir(logger=decky.logger)
 
         self.vpn = VPNManager(plugin_dir, settings_dir, logger=decky.logger)
         decky.logger.info(f"sub-deck loaded. settings_dir={settings_dir}")
@@ -90,8 +129,11 @@ class Plugin:
         settings = self.vpn.load_settings()
         tray_enabled = settings.get("desktop_tray_enabled", True)
         if "desktop_tray_enabled" not in settings:
-            settings["desktop_tray_enabled"] = True
-            self.vpn.save_settings(settings)
+            if not getattr(self.vpn, "_settings_read_failed", False):
+                settings["desktop_tray_enabled"] = True
+                self.vpn.save_settings(settings)
+            else:
+                decky.logger.warning("Skipping automatic save_settings because settings load failed.")
 
         if tray_enabled:
             try:
@@ -359,7 +401,7 @@ class Plugin:
             await self.loop.run_in_executor(None, launch_tray_process, plugin_dir)
         else:
             await self.loop.run_in_executor(None, set_autostart, plugin_dir, False)
-            await self.loop.run_in_executor(None, kill_tray_process)
+            await self.loop.run_in_executor(None, kill_tray_process, plugin_dir)
         return True
 
     async def launch_desktop_tray(self) -> bool:
@@ -382,7 +424,18 @@ class Plugin:
         if self.sleep_task:
             self.sleep_task.cancel()
         if self.vpn:
-            await self.loop.run_in_executor(None, self.vpn.stop)
+            if self.loop:
+                await self.loop.run_in_executor(None, self.vpn.stop)
+            else:
+                self.vpn.stop()
+        try:
+            plugin_dir = self.vpn.plugin_dir if self.vpn else os.path.dirname(os.path.abspath(__file__))
+            if self.loop:
+                await self.loop.run_in_executor(None, kill_tray_process, plugin_dir)
+            else:
+                kill_tray_process(plugin_dir)
+        except Exception as e:
+            decky.logger.warning(f"Error killing tray process in _unload: {e}")
         decky.logger.info("sub-deck unloaded")
 
     async def _uninstall(self) -> None:
@@ -401,7 +454,7 @@ class Plugin:
         try:
             plugin_dir = self.vpn.plugin_dir if self.vpn else os.path.dirname(os.path.abspath(__file__))
             set_autostart(plugin_dir, False)
-            kill_tray_process()
+            kill_tray_process(plugin_dir)
         except Exception:
             pass
         decky.logger.info("sub-deck uninstalled")

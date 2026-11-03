@@ -19,6 +19,7 @@ def handshake_ping(host: str, port: int, sni: Optional[str] = None, timeout: flo
     Returns None if connection failed.
     """
     start = time.time()
+    s = None
     try:
         s = socket.create_connection((host, port), timeout=timeout)
         if sni:
@@ -27,10 +28,15 @@ def handshake_ping(host: str, port: int, sni: Optional[str] = None, timeout: flo
             ctx.verify_mode = ssl.CERT_NONE
             with ctx.wrap_socket(s, server_hostname=sni):
                 return (time.time() - start) * 1000.0
-        s.close()
         return (time.time() - start) * 1000.0
     except Exception:
         return None
+    finally:
+        if s is not None:
+            try:
+                s.close()
+            except Exception:
+                pass
 
 
 def tcp_ping(host: str, port: int, timeout: float = PING_DEFAULT_TIMEOUT) -> Optional[float]:

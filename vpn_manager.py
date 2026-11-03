@@ -5,8 +5,10 @@ Coordinates proxy cores (Xray-core + tun2socks), routing and subscription states
 
 import os
 import json
+import shutil
 import subprocess
 import tempfile
+import threading
 import time
 from typing import Dict, List, Optional, Any
 
@@ -66,6 +68,8 @@ class VPNManager:
         self._last_server_ip: Optional[str] = None
         self._last_gw_ip: Optional[str] = None
         self._last_iface: Optional[str] = None
+        self._settings_read_failed: bool = False
+        self._storage_lock = threading.RLock()
 
         os.makedirs(self.bin_dir, exist_ok=True)
         os.makedirs(self.settings_dir, exist_ok=True)
@@ -82,102 +86,199 @@ class VPNManager:
     # ────────────────────────────────────────────────
 
     def load_settings(self) -> Dict[str, Any]:
-        """Loads plugin configuration and migrates legacy keys if needed."""
-        if os.path.exists(self.settings_file):
-            try:
-                with open(self.settings_file, "r", encoding="utf-8") as f:
-                    settings = json.load(f)
-                    # Migrate single subscription_url to subscriptions list
-                    if "subscription_url" in settings and "subscriptions" not in settings:
-                        old_url = settings.get("subscription_url", "")
-                        settings["subscriptions"] = [old_url] if old_url else []
-                    return settings
-            except Exception as e:
-                self.log(f"Error reading settings: {e}")
-        return {"subscriptions": [], "selected_node": None}
+        """Loads plugin configuration and migrates legacy keys if needed, with .bak fallback."""
+        with self._storage_lock:
+            bak_file = self.settings_file + ".bak"
+
+            # 1. Try loading primary file
+            if os.path.exists(self.settings_file) and os.path.getsize(self.settings_file) > 0:
+                try:
+                    with open(self.settings_file, "r", encoding="utf-8") as f:
+                        settings = json.load(f)
+                        if isinstance(settings, dict):
+                            if "subscription_url" in settings and "subscriptions" not in settings:
+                                old_url = settings.get("subscription_url", "")
+                                settings["subscriptions"] = [old_url] if old_url else []
+                            self._settings_read_failed = False
+                            return settings
+                except Exception as e:
+                    self.log(f"Error reading primary settings: {e}")
+
+            # 2. Try loading backup file (.bak)
+            if os.path.exists(bak_file) and os.path.getsize(bak_file) > 0:
+                try:
+                    with open(bak_file, "r", encoding="utf-8") as f:
+                        settings = json.load(f)
+                        if isinstance(settings, dict):
+                            if "subscription_url" in settings and "subscriptions" not in settings:
+                                old_url = settings.get("subscription_url", "")
+                                settings["subscriptions"] = [old_url] if old_url else []
+                            self.log("Loaded settings from backup file (.bak) due to primary failure.")
+                            self._settings_read_failed = False
+                            return settings
+                except Exception as e:
+                    self.log(f"Error reading backup settings (.bak): {e}")
+
+            # If primary file exists on disk but couldn't be decoded, flag the read failure
+            if os.path.exists(self.settings_file):
+                self._settings_read_failed = True
+            else:
+                self._settings_read_failed = False
+
+            return {"subscriptions": [], "selected_node": None}
 
     def save_settings(self, settings: Dict[str, Any]) -> None:
-        """Persists settings atomically using a temporary file."""
-        tmp_file = None
-        try:
-            with tempfile.NamedTemporaryFile("w", dir=self.settings_dir, delete=False, encoding="utf-8") as f:
-                tmp_file = f.name
-                json.dump(settings, f, indent=2)
-            try:
-                os.chmod(tmp_file, 0o666)
-            except Exception:
-                pass
-            os.replace(tmp_file, self.settings_file)
-            try:
-                os.chmod(self.settings_file, 0o666)
-            except Exception:
-                pass
-        except Exception as e:
-            self.log(f"Failed to save settings: {e}")
-            if tmp_file and os.path.exists(tmp_file):
+        """Persists settings atomically using a temporary file with fsync and .bak backup."""
+        with self._storage_lock:
+            os.makedirs(self.settings_dir, exist_ok=True)
+            bak_file = self.settings_file + ".bak"
+
+            # Create backup only if current file exists, is non-empty, and is valid JSON
+            if os.path.exists(self.settings_file) and os.path.getsize(self.settings_file) > 0:
                 try:
-                    os.remove(tmp_file)
+                    with open(self.settings_file, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    if isinstance(data, dict):
+                        shutil.copy2(self.settings_file, bak_file)
+                    else:
+                        self.log("Preserving existing settings .bak: primary file JSON is not a dict.")
+                except Exception as e:
+                    self.log(f"Preserving existing settings .bak: primary file is invalid JSON: {e}")
+
+            tmp_file = None
+            try:
+                with tempfile.NamedTemporaryFile("w", dir=self.settings_dir, delete=False, encoding="utf-8") as f:
+                    tmp_file = f.name
+                    json.dump(settings, f, indent=2)
+                    f.flush()
+                    os.fsync(f.fileno())
+                try:
+                    os.chmod(tmp_file, 0o666)
                 except Exception:
                     pass
+                os.replace(tmp_file, self.settings_file)
+                try:
+                    os.chmod(self.settings_file, 0o666)
+                except Exception:
+                    pass
+                self._settings_read_failed = False
+            except Exception as e:
+                self.log(f"Failed to save settings: {e}")
+                if tmp_file and os.path.exists(tmp_file):
+                    try:
+                        os.remove(tmp_file)
+                    except Exception:
+                        pass
 
     def get_nodes(self) -> List[Dict[str, Any]]:
         """Returns cached proxy nodes, prepending the auto least-ping virtual node if multiple nodes exist."""
-        nodes = []
-        if os.path.exists(self.nodes_cache_path):
-            try:
-                with open(self.nodes_cache_path, "r", encoding="utf-8") as f:
-                    raw_nodes = json.load(f)
-                    for n in raw_nodes:
+        with self._storage_lock:
+            nodes = []
+            raw_nodes = None
+            bak_file = self.nodes_cache_path + ".bak"
+
+            if os.path.exists(self.nodes_cache_path) and os.path.getsize(self.nodes_cache_path) > 0:
+                try:
+                    with open(self.nodes_cache_path, "r", encoding="utf-8") as f:
+                        raw_nodes = json.load(f)
+                    if not isinstance(raw_nodes, list):
+                        self.log("Primary nodes cache is not a JSON list, falling back to .bak")
+                        raw_nodes = None
+                except Exception as e:
+                    self.log(f"Error reading nodes cache: {e}")
+                    raw_nodes = None
+
+            if raw_nodes is None and os.path.exists(bak_file) and os.path.getsize(bak_file) > 0:
+                try:
+                    with open(bak_file, "r", encoding="utf-8") as f:
+                        raw_nodes = json.load(f)
+                        if isinstance(raw_nodes, list):
+                            self.log("Loaded nodes from backup cache (.bak) due to primary cache failure.")
+                        else:
+                            self.log("Backup nodes cache (.bak) is not a JSON list.")
+                            raw_nodes = None
+                except Exception as e:
+                    self.log(f"Error reading backup nodes cache (.bak): {e}")
+                    raw_nodes = None
+
+            if isinstance(raw_nodes, list):
+                for n in raw_nodes:
+                    if isinstance(n, dict):
                         n["name"] = clean_node_name(n.get("name", ""))
                         nodes.append(n)
-            except Exception:
-                pass
 
-        # Separate WARP nodes and other nodes to put WARP right at the top
-        warp_nodes = [n for n in nodes if n.get("type") in ("warp", "wireguard") or n.get("subscription_url") == "cloudflare_warp"]
-        other_nodes = [n for n in nodes if n.get("type") not in ("warp", "wireguard") and n.get("subscription_url") != "cloudflare_warp"]
-        ordered_nodes = warp_nodes + other_nodes
+            # Separate WARP nodes and other nodes to put WARP right at the top
+            warp_nodes = [n for n in nodes if n.get("type") in ("warp", "wireguard") or n.get("subscription_url") == "cloudflare_warp"]
+            other_nodes = [n for n in nodes if n.get("type") not in ("warp", "wireguard") and n.get("subscription_url") != "cloudflare_warp"]
+            ordered_nodes = warp_nodes + other_nodes
 
-        if len(ordered_nodes) > 1 and not any(n.get("type") == "auto_balancer" for n in ordered_nodes):
-            auto_node = {
-                "type": "auto_balancer",
-                "name": "⚡ Авто-выбор лучшего",
-                "server": "auto",
-                "port": 0,
-                "ping": 1
-            }
-            return [auto_node] + ordered_nodes
-        return ordered_nodes
+            if len(ordered_nodes) > 1 and not any(n.get("type") == "auto_balancer" for n in ordered_nodes):
+                auto_node = {
+                    "type": "auto_balancer",
+                    "name": "⚡ Авто-выбор лучшего",
+                    "server": "auto",
+                    "port": 0,
+                    "ping": 1
+                }
+                return [auto_node] + ordered_nodes
+            return ordered_nodes
 
     def load_nodes(self) -> List[Dict[str, Any]]:
         """Alias for get_nodes."""
         return self.get_nodes()
 
-    def save_nodes(self, nodes: List[Dict[str, Any]]) -> None:
-        """Persists nodes list to disk atomically using a temporary file."""
-        clean_nodes = [n for n in nodes if n.get("type") != "auto_balancer"]
-        tmp_file = None
-        try:
-            with tempfile.NamedTemporaryFile("w", dir=self.settings_dir, delete=False, encoding="utf-8") as f:
-                tmp_file = f.name
-                json.dump(clean_nodes, f)
-            try:
-                os.chmod(tmp_file, 0o666)
-            except Exception:
-                pass
-            os.replace(tmp_file, self.nodes_cache_path)
-            try:
-                os.chmod(self.nodes_cache_path, 0o666)
-            except Exception:
-                pass
-            self.log(f"Saved total of {len(clean_nodes)} nodes to cache.")
-        except Exception as e:
-            self.log(f"Failed to save nodes cache: {e}")
-            if tmp_file and os.path.exists(tmp_file):
+    def save_nodes(self, nodes: List[Dict[str, Any]], force: bool = False) -> None:
+        """Persists nodes list to disk atomically with fsync and .bak backup. Never overwrites with empty unless force=True."""
+        with self._storage_lock:
+            clean_nodes = [n for n in nodes if n.get("type") != "auto_balancer"]
+
+            # Prevent wiping existing cache with empty list unless explicitly forced
+            if len(clean_nodes) == 0 and not force:
+                existing = self.load_nodes()
+                real_existing = [n for n in existing if n.get("type") != "auto_balancer"]
+                if real_existing:
+                    self.log("save_nodes: refusing to overwrite existing nodes with empty list without force=True. Preserving cached nodes.")
+                    return
+
+            os.makedirs(self.settings_dir, exist_ok=True)
+            bak_file = self.nodes_cache_path + ".bak"
+
+            # Create backup only if current file exists, is non-empty, and is valid JSON
+            if os.path.exists(self.nodes_cache_path) and os.path.getsize(self.nodes_cache_path) > 0:
                 try:
-                    os.remove(tmp_file)
+                    with open(self.nodes_cache_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    if isinstance(data, list):
+                        shutil.copy2(self.nodes_cache_path, bak_file)
+                    else:
+                        self.log("Preserving existing nodes .bak: primary file JSON is not a list.")
+                except Exception as e:
+                    self.log(f"Preserving existing nodes .bak: primary file is invalid JSON: {e}")
+
+            tmp_file = None
+            try:
+                with tempfile.NamedTemporaryFile("w", dir=self.settings_dir, delete=False, encoding="utf-8") as f:
+                    tmp_file = f.name
+                    json.dump(clean_nodes, f)
+                    f.flush()
+                    os.fsync(f.fileno())
+                try:
+                    os.chmod(tmp_file, 0o666)
                 except Exception:
                     pass
+                os.replace(tmp_file, self.nodes_cache_path)
+                try:
+                    os.chmod(self.nodes_cache_path, 0o666)
+                except Exception:
+                    pass
+                self.log(f"Saved total of {len(clean_nodes)} nodes to cache.")
+            except Exception as e:
+                self.log(f"Failed to save nodes cache: {e}")
+                if tmp_file and os.path.exists(tmp_file):
+                    try:
+                        os.remove(tmp_file)
+                    except Exception:
+                        pass
 
     # ────────────────────────────────────────────────
     # Subscription Management
@@ -199,111 +300,143 @@ class VPNManager:
 
     def parse_all_subscriptions(self) -> List[Dict[str, Any]]:
         """Refreshes all subscribed endpoints, updates metadata and aggregates nodes."""
-        settings = self.load_settings()
-        urls = settings.get("subscriptions", [])
-        all_nodes: List[Dict[str, Any]] = []
+        with self._storage_lock:
+            settings = self.load_settings()
+            urls = settings.get("subscriptions", [])
+            current_cached_nodes = self.load_nodes()
+            all_nodes: List[Dict[str, Any]] = []
 
-        update_intervals = settings.setdefault("update_intervals", {})
-        last_update_times = settings.setdefault("last_update_times", {})
-        sub_metadata = settings.setdefault("subscription_metadata", {})
+            update_intervals = settings.setdefault("update_intervals", {})
+            last_update_times = settings.setdefault("last_update_times", {})
+            sub_metadata = settings.setdefault("subscription_metadata", {})
 
-        self.log(f"Starting refresh of all subscriptions: {len(urls)} links")
-        for url in urls:
-            try:
-                nodes, interval, meta = self.parse_subscription(url)
-                all_nodes.extend(nodes)
-                now_ts = int(time.time())
-                last_update_times[url] = now_ts
-                if interval is not None:
-                    update_intervals[url] = int(interval)
-                if meta:
-                    existing_meta = sub_metadata.get(url, {})
-                    existing_meta.update(meta)
-                    existing_meta["last_updated"] = now_ts
-                    sub_metadata[url] = existing_meta
-            except Exception as e:
-                self.log(f"Failed to parse subscription {url}: {e}")
+            self.log(f"Starting refresh of all subscriptions: {len(urls)} links")
+            for url in urls:
+                try:
+                    nodes, interval, meta = self.parse_subscription(url)
+                    now_ts = int(time.time())
+                    last_update_times[url] = now_ts
+                    if interval is not None:
+                        update_intervals[url] = int(interval)
+                    if meta:
+                        existing_meta = sub_metadata.get(url, {})
+                        existing_meta.update(meta)
+                        existing_meta["last_updated"] = now_ts
+                        sub_metadata[url] = existing_meta
 
-        settings["update_intervals"] = update_intervals
-        settings["last_update_times"] = last_update_times
-        settings["subscription_metadata"] = sub_metadata
-        self.save_settings(settings)
-        self.save_nodes(all_nodes)
+                    if nodes:
+                        all_nodes.extend(nodes)
+                    else:
+                        # Non-destructive caching: keep existing nodes for this URL if update returned empty
+                        cached_for_url = [n for n in current_cached_nodes if n.get("subscription_url") == url]
+                        if cached_for_url:
+                            self.log(f"Subscription {url} returned 0 nodes, retaining {len(cached_for_url)} cached nodes.")
+                            all_nodes.extend(cached_for_url)
+                        else:
+                            self.log(f"Subscription {url} returned 0 nodes and no previous cached nodes.")
+                except Exception as e:
+                    self.log(f"Failed to parse subscription {url}: {e}")
+                    # Preserve cached nodes on exception as well
+                    cached_for_url = [n for n in current_cached_nodes if n.get("subscription_url") == url]
+                    if cached_for_url:
+                        all_nodes.extend(cached_for_url)
 
-        return all_nodes
+            settings["update_intervals"] = update_intervals
+            settings["last_update_times"] = last_update_times
+            settings["subscription_metadata"] = sub_metadata
+            self.save_settings(settings)
+            # If user explicitly has zero subscriptions, allow wiping node cache via force=True
+            force_save = (len(urls) == 0)
+            self.save_nodes(all_nodes, force=force_save)
+
+            return all_nodes
 
     def add_subscription(self, url: str) -> List[Dict[str, Any]]:
         """Adds a single subscription and updates the node pool."""
-        settings = self.load_settings()
-        subscriptions = settings.get("subscriptions", [])
-        if url not in subscriptions:
-            subscriptions.append(url)
-            settings["subscriptions"] = subscriptions
-            self.save_settings(settings)
-            self.log(f"Added subscription URL: {url}")
+        with self._storage_lock:
+            settings = self.load_settings()
+            subscriptions = settings.get("subscriptions", [])
+            if url not in subscriptions:
+                subscriptions.append(url)
+                settings["subscriptions"] = subscriptions
+                self.save_settings(settings)
+                self.log(f"Added subscription URL: {url}")
         return self.parse_all_subscriptions()
 
     def add_multiple_subscriptions(self, urls: List[str]) -> List[Dict[str, Any]]:
         """Bulk adds subscriptions."""
-        settings = self.load_settings()
-        subscriptions = settings.get("subscriptions", [])
-        updated = False
-        for url in urls:
-            if url not in subscriptions:
-                subscriptions.append(url)
-                updated = True
-        if updated:
-            settings["subscriptions"] = subscriptions
-            self.save_settings(settings)
-            self.log(f"Added multiple subscriptions: {urls}")
+        with self._storage_lock:
+            settings = self.load_settings()
+            subscriptions = settings.get("subscriptions", [])
+            updated = False
+            for url in urls:
+                if url not in subscriptions:
+                    subscriptions.append(url)
+                    updated = True
+            if updated:
+                settings["subscriptions"] = subscriptions
+                self.save_settings(settings)
+                self.log(f"Added multiple subscriptions: {urls}")
         return self.parse_all_subscriptions()
 
     def remove_subscription(self, url: str) -> List[Dict[str, Any]]:
         """Removes a subscription URL and prunes associated nodes and metadata."""
-        settings = self.load_settings()
-        subscriptions = settings.get("subscriptions", [])
-        if url in subscriptions:
-            subscriptions.remove(url)
-            settings["subscriptions"] = subscriptions
-            # Prune metadata and intervals
-            if "subscription_metadata" in settings and url in settings["subscription_metadata"]:
-                del settings["subscription_metadata"][url]
-            if "last_update_times" in settings and url in settings["last_update_times"]:
-                del settings["last_update_times"][url]
-            if "update_intervals" in settings and url in settings["update_intervals"]:
-                del settings["update_intervals"][url]
-            self.save_settings(settings)
-            self.log(f"Removed subscription URL: {url}")
+        with self._storage_lock:
+            settings = self.load_settings()
+            subscriptions = settings.get("subscriptions", [])
+            if url in subscriptions:
+                subscriptions.remove(url)
+                settings["subscriptions"] = subscriptions
+                # Prune metadata and intervals
+                if "subscription_metadata" in settings and url in settings["subscription_metadata"]:
+                    del settings["subscription_metadata"][url]
+                if "last_update_times" in settings and url in settings["last_update_times"]:
+                    del settings["last_update_times"][url]
+                if "update_intervals" in settings and url in settings["update_intervals"]:
+                    del settings["update_intervals"][url]
+                self.save_settings(settings)
+                self.log(f"Removed subscription URL: {url}")
         return self.parse_all_subscriptions()
 
     def update_subscription(self, url: str) -> List[Dict[str, Any]]:
         """Updates a single subscription, updates metadata, and merges into current cache."""
         self.log(f"Updating single subscription: {url}")
-        new_nodes, interval, meta = self.parse_subscription(url)
+        try:
+            new_nodes, interval, meta = self.parse_subscription(url)
+        except Exception as e:
+            self.log(f"Error parsing subscription {url}: {e}")
+            new_nodes, interval, meta = [], None, {}
 
-        current_nodes = self.load_nodes()
-        # Retain nodes from other subscriptions
-        merged_nodes = [n for n in current_nodes if n.get("subscription_url") != url]
-        merged_nodes.extend(new_nodes)
-        self.save_nodes(merged_nodes)
+        with self._storage_lock:
+            current_nodes = self.load_nodes()
+            # Non-destructive caching: if new_nodes is empty (network error, blocked, timeout),
+            # do NOT wipe old nodes of this subscription!
+            if not new_nodes:
+                self.log(f"Warning: update_subscription for {url} returned 0 nodes. Preserving existing cached nodes.")
+                merged_nodes = current_nodes
+            else:
+                # Retain nodes from other subscriptions and update nodes for this subscription
+                merged_nodes = [n for n in current_nodes if n.get("subscription_url") != url]
+                merged_nodes.extend(new_nodes)
+                self.save_nodes(merged_nodes)
 
-        settings = self.load_settings()
-        last_updates = settings.setdefault("last_update_times", {})
-        update_intervals = settings.setdefault("update_intervals", {})
-        sub_metadata = settings.setdefault("subscription_metadata", {})
+            settings = self.load_settings()
+            last_updates = settings.setdefault("last_update_times", {})
+            update_intervals = settings.setdefault("update_intervals", {})
+            sub_metadata = settings.setdefault("subscription_metadata", {})
 
-        now_ts = int(time.time())
-        last_updates[url] = now_ts
-        if interval is not None:
-            update_intervals[url] = interval
-        if meta:
-            existing_meta = sub_metadata.get(url, {})
-            existing_meta.update(meta)
-            existing_meta["last_updated"] = now_ts
-            sub_metadata[url] = existing_meta
+            now_ts = int(time.time())
+            last_updates[url] = now_ts
+            if interval is not None:
+                update_intervals[url] = interval
+            if meta:
+                existing_meta = sub_metadata.get(url, {})
+                existing_meta.update(meta)
+                existing_meta["last_updated"] = now_ts
+                sub_metadata[url] = existing_meta
 
-        self.save_settings(settings)
-        return merged_nodes
+            self.save_settings(settings)
+            return merged_nodes
 
     def update_geofiles(self, force: bool = False) -> bool:
         """Downloads/updates GeoIP and Geosite databases for RoscomVPN preset."""
@@ -702,7 +835,7 @@ class VPNManager:
                 run_command(["ip", "route", "del", sip])
         run_command(["ip", "link", "delete", TUN_INTERFACE])
 
-        # 2. Terminate child processes
+        # 2. Terminate child processes cleanly and reap zombies
         for proc in (self.tun_process, self.xray_process, self.singbox_process, self.process):
             if proc:
                 try:
@@ -711,13 +844,18 @@ class VPNManager:
                 except Exception:
                     try:
                         proc.kill()
+                        proc.wait(timeout=0.2)
                     except Exception:
                         pass
 
-        # 3. Targeted process cleanup
+        # 3. Targeted process cleanup (SIGTERM followed by SIGKILL for stubborn processes)
         for bin_path in (self.tun2socks_path, self.xray_path, self.singbox_path):
             try:
-                subprocess.run(["pkill", "-f", bin_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.run(["pkill", "-15", "-f", bin_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1.0)
+            except Exception:
+                pass
+            try:
+                subprocess.run(["pkill", "-9", "-f", bin_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1.0)
             except Exception:
                 pass
 
@@ -746,7 +884,11 @@ class VPNManager:
 
         for bin_path in (self.tun2socks_path, self.xray_path, self.singbox_path):
             try:
-                subprocess.run(["pkill", "-f", bin_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.run(["pkill", "-15", "-f", bin_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1.0)
+            except Exception:
+                pass
+            try:
+                subprocess.run(["pkill", "-9", "-f", bin_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1.0)
             except Exception:
                 pass
 

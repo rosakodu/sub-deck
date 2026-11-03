@@ -13,6 +13,8 @@ import math
 import threading
 import subprocess
 import re
+import fcntl
+import errno
 from typing import Optional, Dict, List, Any, Callable
 
 # Ensure plugin root directory is on sys.path
@@ -386,7 +388,14 @@ class SubDeckTrayApp:
         self.main_loop = main_loop
         self.client = SubDeckApiClient()
 
+        self._poll_lock = threading.Lock()
+        self._poll_seq: int = 0
+        self._last_applied_seq: int = 0
+        self._is_polling = False
+        self._last_notification_id: int = 0
+
         self.last_connected_state: Optional[bool] = None
+        self.last_status: Optional[Dict[str, Any]] = None
         self.nodes: List[Dict[str, Any]] = []
         self.settings: Dict[str, Any] = {}
         self.status: Optional[Dict[str, Any]] = None
@@ -410,6 +419,20 @@ class SubDeckTrayApp:
         self.sni = SubDeckSNI(self.session_bus, '/StatusNotifierItem', self)
         self.dbusmenu = SubDeckDBusMenu(self.session_bus, '/MenuBar', self)
 
+        # Request well-known D-Bus name to enforce single-instance registration
+        self.bus_name = None
+        try:
+            self.bus_name = dbus.service.BusName(
+                'org.freedesktop.StatusNotifierItem.sub_deck',
+                self.session_bus,
+                do_not_queue=True
+            )
+        except dbus.exceptions.NameExistsException:
+            print("[SubDeckTray] D-Bus name org.freedesktop.StatusNotifierItem.sub_deck already owned. Exiting.")
+            sys.exit(0)
+        except Exception as e:
+            print(f"[SubDeckTray] Note: could not claim well-known D-Bus name: {e}")
+
         # Register StatusNotifierItem with KDE Plasma StatusNotifierWatcher
         try:
             watcher = self.session_bus.get_object('org.kde.StatusNotifierWatcher', '/StatusNotifierWatcher')
@@ -424,28 +447,51 @@ class SubDeckTrayApp:
         # Trigger initial poll immediately
         self._trigger_background_poll()
 
-    def _send_desktop_notification(self, title: str, message: str, timeout_ms: int = 4000):
-        """Sends native desktop notification via org.freedesktop.Notifications."""
+    def _send_desktop_notification(self, title: str, message: str, timeout_ms: int = 4000) -> int:
+        """Sends native desktop notification via org.freedesktop.Notifications using replaces_id."""
         try:
             notify_obj = self.session_bus.get_object('org.freedesktop.Notifications', '/org/freedesktop/Notifications')
             notify_iface = dbus.Interface(notify_obj, 'org.freedesktop.Notifications')
-            notify_iface.Notify('Sub-Deck VPN', 0, '', title, message, [], {}, timeout_ms)
+            replaces_id = dbus.UInt32(self._last_notification_id)
+            nid = notify_iface.Notify('Sub-Deck VPN', replaces_id, '', title, message, [], {}, dbus.Int32(timeout_ms))
+            self._last_notification_id = int(nid)
+            return self._last_notification_id
         except Exception:
-            pass
+            return 0
 
     def _on_poll_timer(self) -> bool:
         self._trigger_background_poll()
         return True  # Keep GLib timer repeating
 
-    def _trigger_background_poll(self):
+    def _trigger_background_poll(self) -> bool:
         """Runs API queries in background worker thread and safely schedules UI update via GLib.idle_add."""
-        def _worker():
-            status = self.client.get_status()
-            nodes = self.client.get_nodes() if status else []
-            settings = self.client.get_settings() if status else {}
-            GLib.idle_add(self._apply_state, status, nodes, settings)
+        with self._poll_lock:
+            if self._is_polling:
+                return False
+            self._is_polling = True
+            self._poll_seq += 1
+            current_seq = self._poll_seq
 
-        threading.Thread(target=_worker, daemon=True).start()
+        def _worker():
+            try:
+                status = self.client.get_status()
+                nodes = self.client.get_nodes() if status else []
+                settings = self.client.get_settings() if status else {}
+            except Exception:
+                status, nodes, settings = None, [], {}
+            finally:
+                with self._poll_lock:
+                    self._is_polling = False
+
+            GLib.idle_add(self._apply_state, status, nodes, settings, current_seq)
+
+        try:
+            threading.Thread(target=_worker, daemon=True).start()
+            return True
+        except Exception:
+            with self._poll_lock:
+                self._is_polling = False
+            return False
 
     def _register_action(self, callback: Callable[[], None]) -> int:
         aid = self.next_action_id
@@ -476,9 +522,15 @@ class SubDeckTrayApp:
         sub_root = dbus.Struct((dbus.Int32(parent_id_int), sub_props, dbus.Array(sub_children, signature=dbus.Signature('v'))))
         return (self.dbusmenu.revision, sub_root)
 
-    def _apply_state(self, status: Optional[Dict[str, Any]], nodes: List[Dict[str, Any]], settings: Dict[str, Any]) -> bool:
+    def _apply_state(self, status: Optional[Dict[str, Any]], nodes: List[Dict[str, Any]], settings: Dict[str, Any], seq: Optional[int] = None) -> bool:
         """Main thread handler: builds complete DBusMenu hierarchy and updates StatusNotifierItem."""
+        if seq is not None and seq < self._last_applied_seq:
+            return False
+        if seq is not None:
+            self._last_applied_seq = seq
+
         self.status = status
+        self.last_status = status
         self.nodes = nodes
         self.settings = settings
 
@@ -1179,10 +1231,94 @@ class SubDeckTrayApp:
 
 
 # ─────────────────────────────────────────────────────────────
-# Entry Point
+# Single-Instance Lock & Entry Point
 # ─────────────────────────────────────────────────────────────
 
+def get_tray_lock_path() -> str:
+    """Returns path to the exclusive lock file in user runtime dir or /tmp."""
+    uid = None
+    try:
+        uid = os.getuid()
+    except Exception:
+        pass
+
+    xdg_runtime = os.environ.get("XDG_RUNTIME_DIR")
+    if xdg_runtime and os.path.isdir(xdg_runtime) and os.access(xdg_runtime, os.W_OK):
+        return os.path.join(xdg_runtime, "sub-deck-tray.lock")
+
+    if uid is not None:
+        run_user_dir = f"/run/user/{uid}"
+        if os.path.isdir(run_user_dir) and os.access(run_user_dir, os.W_OK):
+            return os.path.join(run_user_dir, "sub-deck-tray.lock")
+        return f"/tmp/sub-deck-tray-{uid}.lock"
+
+    return "/tmp/sub-deck-tray.lock"
+
+
+_instance_lock_file = None
+
+
+def acquire_single_instance_lock(lock_path: Optional[str] = None):
+    """
+    Acquires an exclusive file lock to ensure only a single instance of tray_app runs.
+    Returns:
+    - open file handle f on success (must remain open)
+    - None if already locked by another instance (lock contention: EAGAIN/EWOULDBLOCK)
+    - False if all candidate paths fail to open/create (filesystem/permission error)
+    """
+    target_path = lock_path or get_tray_lock_path()
+    uid = None
+    try:
+        uid = os.getuid()
+    except Exception:
+        pass
+
+    fallback_path = f"/tmp/sub-deck-tray-{uid}.lock" if uid is not None else "/tmp/sub-deck-tray.lock"
+
+    candidates = [target_path]
+    if fallback_path != target_path:
+        candidates.append(fallback_path)
+
+    for path in candidates:
+        try:
+            f = open(path, "a+")
+        except (IOError, OSError):
+            continue
+
+        try:
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return f
+        except BlockingIOError:
+            try:
+                f.close()
+            except Exception:
+                pass
+            return None
+        except (IOError, OSError) as e:
+            if getattr(e, "errno", None) in (errno.EAGAIN, errno.EWOULDBLOCK):
+                try:
+                    f.close()
+                except Exception:
+                    pass
+                return None
+            try:
+                f.close()
+            except Exception:
+                pass
+            continue
+
+    return False
+
+
 def main():
+    global _instance_lock_file
+    _instance_lock_file = acquire_single_instance_lock()
+    if _instance_lock_file is None:
+        print("[SubDeckTray] Another instance is already running (file lock held). Exiting.")
+        sys.exit(0)
+    elif _instance_lock_file is False:
+        print("[SubDeckTray] Warning: Could not create or acquire lock file; proceeding under D-Bus name protection.", file=sys.stderr)
+
     # Setup GLib DBus mainloop
     dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
 

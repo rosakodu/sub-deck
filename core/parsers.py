@@ -4,14 +4,18 @@ VLESS, VMess, Trojan, Shadowsocks, Hysteria 2.
 """
 
 import base64
+import http.client
 import json
 import re
+import socket
 import ssl
 import urllib.parse
 import urllib.request
 from typing import Dict, List, Optional, Tuple, Any
 
 from core.constants import (
+    DEFAULT_SOCKS_HOST,
+    DEFAULT_SOCKS_PORT,
     SUBSCRIPTION_USER_AGENTS,
     SUPPORTED_SCHEMES,
     FREE_SUBSCRIPTIONS,
@@ -37,14 +41,17 @@ def is_free_subscription(url: str) -> bool:
 
 
 def parse_endpoint(endpoint: str) -> Tuple[str, int]:
-    """Parses host:port, supporting IPv6 bracket notation [::1]:port."""
+    """Parses host:port, supporting IPv6 bracket notation [::1]:port and enforcing 1 <= port <= 65535."""
     if endpoint.startswith("["):
         bracket_end = endpoint.find("]")
         if bracket_end == -1:
             return endpoint, 443
         host = endpoint[1:bracket_end]
         rest = endpoint[bracket_end + 1:]
-        port = int(rest.lstrip(":")) if ":" in rest else 443
+        try:
+            port = int(rest.lstrip(":")) if ":" in rest else 443
+        except ValueError:
+            port = 443
     elif ":" in endpoint:
         host, port_str = endpoint.rsplit(":", 1)
         try:
@@ -54,57 +61,64 @@ def parse_endpoint(endpoint: str) -> Tuple[str, int]:
     else:
         host = endpoint
         port = 443
+
+    if not (1 <= port <= 65535):
+        port = 443
+
     return host, port
 
 
 def parse_vless_link(link: str) -> Optional[Dict[str, Any]]:
     """Parses a vless:// URI into node structure."""
-    parsed = urllib.parse.urlparse(link)
-    netloc = parsed.netloc
-    if "@" not in netloc:
-        return None
+    try:
+        parsed = urllib.parse.urlparse(link)
+        netloc = parsed.netloc
+        if "@" not in netloc:
+            return None
 
-    uuid, endpoint = netloc.split("@", 1)
-    host, port = parse_endpoint(endpoint)
-    query = urllib.parse.parse_qs(parsed.query)
-    params = {k: v[0] for k, v in query.items()}
-    name = urllib.parse.unquote(parsed.fragment) if parsed.fragment else f"VLESS {host}:{port}"
+        uuid, endpoint = netloc.split("@", 1)
+        host, port = parse_endpoint(endpoint)
+        query = urllib.parse.parse_qs(parsed.query)
+        params = {k: v[0] for k, v in query.items()}
+        name = urllib.parse.unquote(parsed.fragment) if parsed.fragment else f"VLESS {host}:{port}"
 
-    extra_val = params.get("extra", "")
-    extra_obj = None
-    if extra_val:
-        try:
-            extra_obj = json.loads(urllib.parse.unquote(extra_val))
-        except Exception:
+        extra_val = params.get("extra", "")
+        extra_obj = None
+        if extra_val:
             try:
-                extra_obj = json.loads(extra_val)
+                extra_obj = json.loads(urllib.parse.unquote(extra_val))
             except Exception:
-                extra_obj = None
+                try:
+                    extra_obj = json.loads(extra_val)
+                except Exception:
+                    extra_obj = None
 
-    alpn_val = params.get("alpn", "")
-    alpn_list = [a.strip() for a in alpn_val.split(",") if a.strip()] if alpn_val else []
+        alpn_val = params.get("alpn", "")
+        alpn_list = [a.strip() for a in alpn_val.split(",") if a.strip()] if alpn_val else []
 
-    return {
-        "type": "vless",
-        "name": name,
-        "server": host,
-        "port": port,
-        "uuid": uuid,
-        "security": params.get("security", "none"),
-        "sni": params.get("sni", ""),
-        "pbk": params.get("pbk", ""),
-        "sid": params.get("sid", ""),
-        "spx": params.get("spx", ""),
-        "flow": params.get("flow", ""),
-        "fp": params.get("fp", "chrome"),
-        "transport": params.get("type", "tcp"),
-        "service_name": params.get("serviceName", ""),
-        "path": params.get("path", ""),
-        "host": params.get("host", ""),
-        "mode": params.get("mode", ""),
-        "extra": extra_obj,
-        "alpn": alpn_list,
-    }
+        return {
+            "type": "vless",
+            "name": name,
+            "server": host,
+            "port": port,
+            "uuid": uuid,
+            "security": params.get("security", "none"),
+            "sni": params.get("sni", ""),
+            "pbk": params.get("pbk", ""),
+            "sid": params.get("sid", ""),
+            "spx": params.get("spx", ""),
+            "flow": params.get("flow", ""),
+            "fp": params.get("fp", "chrome"),
+            "transport": params.get("type", "tcp"),
+            "service_name": params.get("serviceName", ""),
+            "path": params.get("path", ""),
+            "host": params.get("host", ""),
+            "mode": params.get("mode", ""),
+            "extra": extra_obj,
+            "alpn": alpn_list,
+        }
+    except Exception:
+        return None
 
 
 def parse_vmess_link(link: str) -> Optional[Dict[str, Any]]:
@@ -538,9 +552,23 @@ def parse_node_link(link: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+def is_proxy_reachable(host: str = DEFAULT_SOCKS_HOST, port: int = DEFAULT_SOCKS_PORT, timeout: float = 0.5) -> bool:
+    """Checks whether local proxy daemon is actively listening on host:port."""
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except Exception:
+        return False
+
+
 def download_subscription_payload(url: str, timeout: float = 15.0) -> Tuple[Optional[bytes], Optional[Any]]:
-    """Downloads subscription raw bytes using fallback User-Agents."""
+    """Downloads subscription raw bytes using fallback User-Agents and local proxy fallback."""
+    if not url or not url.startswith(("http://", "https://")):
+        return None, None
+
     ctx = ssl._create_unverified_context()
+
+    # 1. Direct download attempt
     for ua in SUBSCRIPTION_USER_AGENTS:
         try:
             req = urllib.request.Request(url, headers={"User-Agent": ua})
@@ -548,6 +576,68 @@ def download_subscription_payload(url: str, timeout: float = 15.0) -> Tuple[Opti
                 return resp.read(), resp.info()
         except Exception:
             continue
+
+    # 2. Local proxy fallback (if 127.0.0.1:10808 is reachable via SOCKS5)
+    if is_proxy_reachable(DEFAULT_SOCKS_HOST, DEFAULT_SOCKS_PORT):
+        try:
+            import socks
+
+            class SOCKSHTTPSConnection(http.client.HTTPSConnection):
+                def __init__(self, host, port=None, context=None, check_hostname=None, **kwargs):
+                    super().__init__(host, port=port, context=context, **kwargs)
+                    self._check_hostname = check_hostname
+
+                def connect(self):
+                    sock = socks.create_connection(
+                        (self.host, self.port),
+                        timeout=self.timeout,
+                        proxy_type=socks.SOCKS5,
+                        proxy_addr=DEFAULT_SOCKS_HOST,
+                        proxy_port=DEFAULT_SOCKS_PORT,
+                    )
+                    server_hostname = self.host if self._check_hostname is not False else None
+                    if self._context:
+                        self.sock = self._context.wrap_socket(sock, server_hostname=server_hostname)
+                    else:
+                        self.sock = sock
+
+            class SOCKSHTTPConnection(http.client.HTTPConnection):
+                def connect(self):
+                    self.sock = socks.create_connection(
+                        (self.host, self.port),
+                        timeout=self.timeout,
+                        proxy_type=socks.SOCKS5,
+                        proxy_addr=DEFAULT_SOCKS_HOST,
+                        proxy_port=DEFAULT_SOCKS_PORT,
+                    )
+
+            class SOCKSHandler(urllib.request.HTTPSHandler, urllib.request.HTTPHandler):
+                def __init__(self, debuglevel=None, context=None, check_hostname=None):
+                    super().__init__(debuglevel=debuglevel, context=context, check_hostname=check_hostname)
+                    self._check_hostname = check_hostname
+
+                def https_open(self, req):
+                    return self.do_open(
+                        SOCKSHTTPSConnection,
+                        req,
+                        context=self._context,
+                        check_hostname=self._check_hostname,
+                    )
+
+                def http_open(self, req):
+                    return self.do_open(SOCKSHTTPConnection, req)
+
+            socks_opener = urllib.request.build_opener(SOCKSHandler(context=ctx))
+            for ua in SUBSCRIPTION_USER_AGENTS:
+                try:
+                    req = urllib.request.Request(url, headers={"User-Agent": ua})
+                    with socks_opener.open(req, timeout=timeout) as resp:
+                        return resp.read(), resp.info()
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
     return None, None
 
 
@@ -662,6 +752,18 @@ def decode_subscription_lines(content: bytes) -> List[str]:
 
 def parse_subscription_nodes(url: str, log_func=None) -> Tuple[List[Dict[str, Any]], Optional[int], Dict[str, Any]]:
     """Fetches, parses and dedupes nodes for a subscription URL, returning (nodes, interval, metadata)."""
+    clean_url = (url or "").strip()
+    if clean_url.startswith(SUPPORTED_SCHEMES):
+        if log_func:
+            log_func(f"Detected single node direct URI: {clean_url[:30]}...")
+        node = parse_node_link(clean_url)
+        if node:
+            node["subscription_url"] = url
+            name = node.get("name") or "Custom Node"
+            metadata = {"name": name}
+            return [node], None, metadata
+        return [], None, {}
+
     content, headers = download_subscription_payload(url)
     if content is None:
         if log_func:
@@ -703,10 +805,13 @@ def parse_subscription_nodes(url: str, log_func=None) -> Tuple[List[Dict[str, An
             # 3. Plain text or base64 links
             lines = decode_subscription_lines(content)
             for line in lines:
-                node = parse_node_link(line)
-                if node:
-                    node["subscription_url"] = url
-                    raw_nodes.append(node)
+                try:
+                    node = parse_node_link(line)
+                    if node:
+                        node["subscription_url"] = url
+                        raw_nodes.append(node)
+                except Exception:
+                    continue
 
     # Deduplicate nodes by name
     seen_names = set()

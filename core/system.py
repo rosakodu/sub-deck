@@ -43,8 +43,8 @@ def get_user_home() -> str:
     return os.path.expanduser("~")
 
 
-def run_command(cmd_list, as_root: bool = True, timeout: Optional[float] = None) -> Optional[subprocess.CompletedProcess]:
-    """Runs a system command with optional root elevation (sudo -n)."""
+def run_command(cmd_list, as_root: bool = True, timeout: Optional[float] = 10.0) -> Optional[subprocess.CompletedProcess]:
+    """Runs a system command with optional root elevation (sudo -n). Defaults to 10s timeout to prevent thread worker hangs."""
     cmd = list(cmd_list)
     if as_root and os.geteuid() != 0:
         cmd = ["sudo", "-n"] + cmd

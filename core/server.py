@@ -96,10 +96,10 @@ class SubDeckApiServer:
     async def _handle_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         """Processes HTTP requests from clients."""
         try:
-            # Read request line and headers
+            # Read request line and headers with timeout protection
             header_data = bytearray()
             while True:
-                line = await reader.readline()
+                line = await asyncio.wait_for(reader.readline(), timeout=10.0)
                 if not line:
                     break
                 header_data.extend(line)
@@ -139,12 +139,21 @@ class SubDeckApiServer:
                     k, v = h.split(":", 1)
                     headers[k.strip().lower()] = v.strip()
 
-            content_length = int(headers.get("content-length", 0))
+            try:
+                content_length = int(headers.get("content-length", 0))
+            except ValueError:
+                content_length = 0
 
-            # Read body if present
+            # Guard against giant body payload
+            MAX_BODY_SIZE = 2 * 1024 * 1024  # 2MB
+            if content_length > MAX_BODY_SIZE:
+                await self._send_json_response(writer, 413, {"error": "Payload Too Large"})
+                return
+
+            # Read body if present with timeout protection
             body_bytes = b""
             if content_length > 0:
-                body_bytes = await reader.readexactly(content_length)
+                body_bytes = await asyncio.wait_for(reader.readexactly(content_length), timeout=15.0)
 
             # Handle CORS preflight
             if method == "OPTIONS":
@@ -155,7 +164,11 @@ class SubDeckApiServer:
             body_data = {}
             if body_bytes:
                 try:
-                    body_data = json.loads(body_bytes.decode("utf-8"))
+                    parsed_json = json.loads(body_bytes.decode("utf-8"))
+                    if isinstance(parsed_json, dict):
+                        body_data = parsed_json
+                    else:
+                        body_data = {"_raw_payload": parsed_json}
                 except Exception:
                     body_data = {}
 
@@ -336,6 +349,13 @@ class SubDeckApiServer:
         # ── POST /api/reload ──
         if method == "POST" and path == "/api/reload":
             try:
+                # Stop existing VPN processes and clean up routing before reloading modules
+                if hasattr(self.plugin, "vpn") and self.plugin.vpn:
+                    try:
+                        self.plugin.vpn.stop()
+                    except Exception as stop_err:
+                        self.log(f"Warning during reload vpn.stop(): {stop_err}")
+
                 import importlib
                 import core.constants
                 import core.system

@@ -7,7 +7,7 @@ without cluttering the desktop Application Launcher menu.
 import os
 import shutil
 import subprocess
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from core.system import get_user_home
 
@@ -131,7 +131,7 @@ def get_desktop_integration_status(plugin_dir: str) -> Dict[str, Any]:
     }
 
 
-def kill_tray_process() -> bool:
+def kill_tray_process(plugin_dir: Optional[str] = None) -> bool:
     """Terminates any running tray_app.py instances via systemd user unit and pkill fallback."""
     user_home = get_user_home()
     user_name = os.path.basename(user_home) or "deck"
@@ -158,9 +158,12 @@ def kill_tray_process() -> bool:
     except Exception:
         pass
 
-    # 2. Targeted process kill fallback
+    # 2. Targeted process kill fallback using dynamic script path and pattern matching
     try:
-        subprocess.run(["pkill", "-f", "sub-deck/tray/tray_app.py"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if plugin_dir:
+            script_path = os.path.abspath(os.path.join(plugin_dir, "tray", "tray_app.py"))
+            subprocess.run(["pkill", "-f", script_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["pkill", "-f", "tray/tray_app.py"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return True
     except Exception:
         return False
@@ -172,13 +175,16 @@ def launch_tray_process(plugin_dir: str) -> bool:
     Uses 'systemd-run --user --unit=sub-deck-tray' with fallback to subprocess.Popen.
     Ensures the tray process survives Decky session changes and desktop switching.
     """
-    script_path = os.path.join(plugin_dir, "tray", "tray_app.py")
+    script_path = os.path.abspath(os.path.join(plugin_dir, "tray", "tray_app.py"))
     if not os.path.exists(script_path):
         return False
 
-    # Check if already running
+    # Check if already running using dynamic script path or pattern
     try:
-        res = subprocess.run(["pgrep", "-f", "sub-deck/tray/tray_app.py"], stdout=subprocess.PIPE)
+        res = subprocess.run(["pgrep", "-f", script_path], stdout=subprocess.PIPE)
+        if res.returncode == 0 and res.stdout.strip():
+            return True
+        res = subprocess.run(["pgrep", "-f", "tray/tray_app.py"], stdout=subprocess.PIPE)
         if res.returncode == 0 and res.stdout.strip():
             return True
     except Exception:
