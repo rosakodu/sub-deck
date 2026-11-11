@@ -9,26 +9,29 @@ import shutil
 import subprocess
 from typing import Dict, Any, Optional
 
-from core.system import get_user_home
+from core.system import get_user_home, get_target_uid_gid
 
 
 def get_desktop_paths() -> Dict[str, str]:
-    """Returns absolute paths for autostart and legacy app entries."""
+    """Returns absolute paths for autostart, systemd user unit, and legacy app entries."""
     user_home = get_user_home()
     apps_dir = os.path.join(user_home, ".local", "share", "applications")
     autostart_dir = os.path.join(user_home, ".config", "autostart")
+    systemd_user_dir = os.path.join(user_home, ".config", "systemd", "user")
     return {
         "apps_dir": apps_dir,
         "app_file": os.path.join(apps_dir, "sub-deck-tray.desktop"),
         "autostart_dir": autostart_dir,
         "autostart_file": os.path.join(autostart_dir, "sub-deck-tray.desktop"),
+        "systemd_user_dir": systemd_user_dir,
+        "service_file": os.path.join(systemd_user_dir, "sub-deck-tray.service"),
     }
 
 
 def generate_autostart_content(plugin_dir: str) -> str:
     """Generates KDE autostart FreeDesktop entry with NoDisplay=true."""
-    script_path = os.path.join(plugin_dir, "tray", "tray_app.py")
-    icon_path = os.path.join(plugin_dir, "assets", "logo.png")
+    script_path = os.path.abspath(os.path.join(plugin_dir, "tray", "tray_app.py"))
+    icon_path = os.path.abspath(os.path.join(plugin_dir, "assets", "logo.png"))
 
     content = f"""[Desktop Entry]
 Type=Application
@@ -44,30 +47,60 @@ X-KDE-autostart-after=panel
     return content
 
 
+def generate_systemd_service_content(plugin_dir: str) -> str:
+    """Generates systemd user service unit for tray companion in KDE Plasma."""
+    script_path = os.path.abspath(os.path.join(plugin_dir, "tray", "tray_app.py"))
+    content = f"""[Unit]
+Description=Sub-Deck Desktop Tray Companion
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 "{script_path}"
+Restart=on-failure
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=graphical-session.target
+"""
+    return content
+
+
 def _get_target_uid_gid() -> tuple:
     """Discovers target non-root uid and gid."""
-    user_home = get_user_home()
-    try:
-        st = os.stat(user_home)
-        return st.st_uid, st.st_gid
-    except Exception:
-        return 1000, 1000
+    return get_target_uid_gid()
 
 
-def _safe_write_file(target_path: str, content: str) -> bool:
-    """Writes autostart file and ensures proper non-root ownership if run as root."""
+def _safe_write_file(target_path: str, content: str, mode: int = 0o755) -> bool:
+    """Writes target file and ensures proper non-root ownership if run as root."""
     try:
+        parent_dir = os.path.dirname(target_path)
+        if parent_dir:
+            os.makedirs(parent_dir, exist_ok=True)
+            if os.geteuid() == 0:
+                uid, gid = _get_target_uid_gid()
+                try:
+                    os.chown(parent_dir, uid, gid)
+                except Exception:
+                    pass
+
         if os.path.isfile(target_path):
             try:
                 with open(target_path, "r", encoding="utf-8") as f:
                     if f.read() == content:
+                        os.chmod(target_path, mode)
+                        if os.geteuid() == 0:
+                            uid, gid = _get_target_uid_gid()
+                            os.chown(target_path, uid, gid)
                         return True
             except Exception:
                 pass
 
         with open(target_path, "w", encoding="utf-8") as f:
             f.write(content)
-        os.chmod(target_path, 0o755)
+        os.chmod(target_path, mode)
 
         if os.geteuid() == 0:
             uid, gid = _get_target_uid_gid()
@@ -95,26 +128,59 @@ def remove_app_menu_entry() -> None:
         pass
 
 
+def ensure_desktop_autostart_and_service(plugin_dir: str) -> None:
+    """
+    Ensures autostart entry (~/.config/autostart/sub-deck-tray.desktop)
+    and systemd user service (~/.config/systemd/user/sub-deck-tray.service)
+    are always written, valid, and owned by user deck.
+    """
+    paths = get_desktop_paths()
+    remove_app_menu_entry()
+
+    # 1. Ensure autostart .desktop file
+    autostart_content = generate_autostart_content(plugin_dir)
+    _safe_write_file(paths["autostart_file"], autostart_content, mode=0o755)
+
+    # 2. Ensure systemd user service file
+    service_content = generate_systemd_service_content(plugin_dir)
+    _safe_write_file(paths["service_file"], service_content, mode=0o644)
+
+    # Reload systemd user daemon if possible
+    user_home = get_user_home()
+    user_name = os.path.basename(user_home) or "deck"
+    uid, _ = _get_target_uid_gid()
+    try:
+        if os.geteuid() == 0:
+            subprocess.run(
+                ["sudo", "-u", user_name, "env", f"XDG_RUNTIME_DIR=/run/user/{uid}", "systemctl", "--user", "daemon-reload"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3
+            )
+        else:
+            subprocess.run(
+                ["systemctl", "--user", "daemon-reload"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3
+            )
+    except Exception:
+        pass
+
+
 def set_autostart(plugin_dir: str, enable: bool) -> bool:
     """Enables or disables KDE Plasma autostart."""
     paths = get_desktop_paths()
     remove_app_menu_entry()
     try:
         if enable:
-            os.makedirs(paths["autostart_dir"], exist_ok=True)
-            if os.geteuid() == 0:
-                uid, gid = _get_target_uid_gid()
-                try:
-                    os.chown(paths["autostart_dir"], uid, gid)
-                except Exception:
-                    pass
-
-            content = generate_autostart_content(plugin_dir)
-            return _safe_write_file(paths["autostart_file"], content)
+            ensure_desktop_autostart_and_service(plugin_dir)
+            return True
         else:
             if os.path.exists(paths["autostart_file"]):
                 try:
                     os.remove(paths["autostart_file"])
+                except Exception:
+                    pass
+            if os.path.exists(paths["service_file"]):
+                try:
+                    os.remove(paths["service_file"])
                 except Exception:
                     pass
             return True

@@ -21,10 +21,11 @@ except ImportError:
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from core.constants import FREE_SUBSCRIPTIONS, PRESET_ROSCOMVPN
-from core.system import get_user_home, read_system_clipboard, get_default_gateway
+from core.system import get_user_home, read_system_clipboard, get_default_gateway, get_target_uid_gid
 from core.server import SubDeckApiServer
 from tray.desktop_integration import (
     set_autostart,
+    ensure_desktop_autostart_and_service,
     get_desktop_integration_status,
     launch_tray_process,
     kill_tray_process,
@@ -125,7 +126,13 @@ class Plugin:
         self.api_server = SubDeckApiServer(self, logger=decky.logger)
         await self.api_server.start()
 
-        # Desktop tray integration (enabled by default on installation)
+        # Desktop tray integration: ALWAYS ensure autostart .desktop and systemd user service exist
+        try:
+            await self.loop.run_in_executor(None, ensure_desktop_autostart_and_service, plugin_dir)
+        except Exception as e:
+            decky.logger.warning(f"Error ensuring desktop autostart and service: {e}")
+
+        # Desktop tray process launch if enabled
         settings = self.vpn.load_settings()
         tray_enabled = settings.get("desktop_tray_enabled", True)
         if "desktop_tray_enabled" not in settings:
@@ -137,7 +144,6 @@ class Plugin:
 
         if tray_enabled:
             try:
-                await self.loop.run_in_executor(None, set_autostart, plugin_dir, True)
                 await self.loop.run_in_executor(None, launch_tray_process, plugin_dir)
             except Exception as e:
                 decky.logger.error(f"Failed to start desktop tray: {e}")

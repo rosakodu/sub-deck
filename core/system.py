@@ -43,6 +43,24 @@ def get_user_home() -> str:
     return os.path.expanduser("~")
 
 
+def get_target_uid_gid() -> tuple:
+    """Discovers target non-root uid and gid for user files on SteamOS."""
+    user_home = get_user_home()
+    try:
+        st = os.stat(user_home)
+        return st.st_uid, st.st_gid
+    except Exception:
+        pass
+    try:
+        import pwd
+        user_name = os.path.basename(user_home) or "deck"
+        pw = pwd.getpwnam(user_name)
+        return pw.pw_uid, pw.pw_gid
+    except Exception:
+        pass
+    return 1000, 1000
+
+
 def run_command(cmd_list, as_root: bool = True, timeout: Optional[float] = 10.0) -> Optional[subprocess.CompletedProcess]:
     """Runs a system command with optional root elevation (sudo -n). Defaults to 10s timeout to prevent thread worker hangs."""
     cmd = list(cmd_list)

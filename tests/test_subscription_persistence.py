@@ -217,6 +217,40 @@ class TestSubscriptionPersistence(unittest.TestCase):
             content = f.read()
         self.assertEqual(content, "{bad json")
 
+    def test_dual_persistence_sync_and_fallback(self):
+        """Dual-persistence must write to both directories and recover if one is deleted."""
+        with tempfile.TemporaryDirectory() as primary_dir, tempfile.TemporaryDirectory() as fallback_dir:
+            mgr = VPNManager(
+                plugin_dir=BASE_DIR,
+                settings_dir=primary_dir,
+                fallback_settings_dir=fallback_dir
+            )
+
+            # Save settings and nodes
+            mgr.save_settings({"subscriptions": ["https://dual.com"], "desktop_tray_enabled": True})
+            mgr.save_nodes([{"name": "DualNode", "server": "1.1.1.1", "port": 443, "type": "vless"}])
+
+            # Verify both locations have the files
+            self.assertTrue(os.path.exists(os.path.join(primary_dir, "settings.json")))
+            self.assertTrue(os.path.exists(os.path.join(fallback_dir, "settings.json")))
+            self.assertTrue(os.path.exists(os.path.join(primary_dir, "nodes.json")))
+            self.assertTrue(os.path.exists(os.path.join(fallback_dir, "nodes.json")))
+
+            # Delete primary files completely (simulate Decky reset)
+            os.remove(os.path.join(primary_dir, "settings.json"))
+            os.remove(os.path.join(primary_dir, "nodes.json"))
+
+            # Load should recover from fallback
+            loaded_settings = mgr.load_settings()
+            self.assertEqual(loaded_settings.get("subscriptions"), ["https://dual.com"])
+            loaded_nodes = mgr.load_nodes()
+            names = [n["name"] for n in loaded_nodes]
+            self.assertIn("DualNode", names)
+
+            # And primary files should be re-created during sync recovery
+            self.assertTrue(os.path.exists(os.path.join(primary_dir, "settings.json")))
+            self.assertTrue(os.path.exists(os.path.join(primary_dir, "nodes.json")))
+
     def test_settings_dir_resolution_and_migration(self):
         """resolve_and_migrate_settings_dir must copy legacy ~/.config/sub-deck files to target."""
         with tempfile.TemporaryDirectory() as fake_home, tempfile.TemporaryDirectory() as target_dir:
