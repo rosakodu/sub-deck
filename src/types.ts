@@ -1,4 +1,5 @@
 export interface NodeConfig {
+  ping?: number | null;
   name: string;
   uuid: string;
   server: string;

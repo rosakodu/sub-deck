@@ -183,9 +183,9 @@ def build_xray_config(node: Dict[str, Any], server_ip: str, preset: str = "defau
     """Generates complete Xray JSON configuration structure."""
     outbound = build_outbound(node, server_ip)
 
-    direct_outbound: Dict[str, Any] = {"protocol": "freedom", "tag": "direct", "settings": {"domainStrategy": "UseIP"}}
+    direct_outbound: Dict[str, Any] = {"protocol": "freedom", "tag": "direct", "streamSettings": {"sockopt": {"domainStrategy": "UseIP"}}}
     if iface:
-        direct_outbound["streamSettings"] = {"sockopt": {"interface": iface}}
+        direct_outbound["streamSettings"]["sockopt"]["interface"] = iface
         if "streamSettings" in outbound:
             outbound["streamSettings"].setdefault("sockopt", {})["interface"] = iface
 
@@ -193,9 +193,11 @@ def build_xray_config(node: Dict[str, Any], server_ip: str, preset: str = "defau
         outbound,
         direct_outbound,
         {"protocol": "blackhole", "tag": "block"},
+        {"protocol": "dns", "tag": "dns-out"},
     ]
 
     routing_rules = [
+        {"type": "field", "inboundTag": ["socks-in", "socks"], "port": "53", "outboundTag": "dns-out"},
         {"type": "field", "ip": ["geoip:private"], "outboundTag": "direct"},
     ]
 
@@ -249,6 +251,14 @@ def build_xray_config(node: Dict[str, Any], server_ip: str, preset: str = "defau
         "log": {
             "loglevel": "warning",
         },
+        "dns": {
+            "servers": [
+                "https://1.1.1.1/dns-query",
+                "https://1.0.0.1/dns-query",
+                "https://8.8.8.8/dns-query"
+            ],
+            "queryStrategy": "UseIPv4"
+        },
         "inbounds": [
             {
                 "tag": "socks-in",
@@ -295,8 +305,18 @@ def build_auto_balancer_config(
         host = node.get("server")
         if not host:
             continue
-        ip = resolve_host(host) or host
-        if ip and ip not in server_ips:
+        raw_ip = resolve_host(host)
+        if not raw_ip:
+            continue
+        import ipaddress
+        try:
+            ipaddress.ip_address(raw_ip)
+            ip = raw_ip
+        except ValueError:
+            # Cannot resolve host to a valid IP (e.g. banner node like ib.ob), skip!
+            continue
+
+        if ip not in server_ips:
             server_ips.append(ip)
 
         tag = f"proxy-{idx + 1}"
@@ -317,6 +337,11 @@ def build_auto_balancer_config(
                 continue
 
         ob["tag"] = tag
+        if "settings" in ob:
+            for vn in ob["settings"].get("vnext", []):
+                vn["address"] = ip
+            for srv in ob["settings"].get("servers", []):
+                srv["address"] = ip
         if iface and "streamSettings" in ob:
             ob["streamSettings"].setdefault("sockopt", {})["interface"] = iface
 
@@ -327,16 +352,17 @@ def build_auto_balancer_config(
         outbounds.append({"protocol": "freedom", "tag": "proxy-1"})
         candidate_tags.append("proxy-1")
 
-    direct_outbound: Dict[str, Any] = {"protocol": "freedom", "tag": "direct", "settings": {"domainStrategy": "UseIP"}}
+    direct_outbound: Dict[str, Any] = {"protocol": "freedom", "tag": "direct", "streamSettings": {"sockopt": {"domainStrategy": "UseIP"}}}
     if iface:
-        direct_outbound["streamSettings"] = {"sockopt": {"interface": iface}}
+        direct_outbound["streamSettings"]["sockopt"]["interface"] = iface
 
     outbounds.append(direct_outbound)
     outbounds.append({"protocol": "blackhole", "tag": "block"})
+    outbounds.append({"protocol": "dns", "tag": "dns-out"})
 
     # Base routing rules
     routing_rules = [
-        {"type": "field", "port": "53", "outboundTag": candidate_tags[0]},
+        {"type": "field", "inboundTag": ["socks-in", "socks"], "port": "53", "outboundTag": "dns-out"},
         {"type": "field", "ip": ["geoip:private"], "outboundTag": "direct"},
     ]
 
@@ -358,6 +384,14 @@ def build_auto_balancer_config(
 
     config_data = {
         "log": {"loglevel": "warning"},
+        "dns": {
+            "servers": [
+                "https://1.1.1.1/dns-query",
+                "https://1.0.0.1/dns-query",
+                "https://8.8.8.8/dns-query"
+            ],
+            "queryStrategy": "UseIPv4"
+        },
         "inbounds": [
             {
                 "tag": "socks-in",

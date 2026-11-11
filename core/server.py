@@ -320,11 +320,8 @@ class SubDeckApiServer:
 
         # ── POST /api/ping ──
         if method == "POST" and path == "/api/ping":
-            nodes = vpn.get_nodes()
-            alive_nodes = await self.plugin.loop.run_in_executor(
-                None, lambda: check_nodes_ping(nodes, timeout=1.5)
-            )
-            return 200, {"nodes": alive_nodes}
+            nodes = await self.plugin.ping_nodes()
+            return 200, {"nodes": nodes}
 
         # ── POST /api/ping/real ──
         if method == "POST" and path == "/api/ping/real":
