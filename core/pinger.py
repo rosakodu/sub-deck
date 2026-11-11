@@ -137,3 +137,35 @@ def select_best_nodes(
 
     # Fallback to head of original list
     return nodes[:target_count]
+
+
+def ping_all_nodes(nodes: List[Dict[str, Any]], max_workers: int = 25, timeout: float = 1.8) -> List[Dict[str, Any]]:
+    """
+    Runs parallel TLS/TCP handshake ping across all nodes and returns
+    the full list with updated 'ping' (latency in ms, or None if unreachable).
+    """
+    if not nodes:
+        return []
+
+    node_copies = [n.copy() for n in nodes]
+    futures_map = {}
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        for idx, n in enumerate(node_copies):
+            host = n.get("server")
+            port = n.get("port")
+            if host and port and n.get("type") != "auto_balancer":
+                sni = n.get("sni") or n.get("host")
+                fut = executor.submit(handshake_ping, host, port, sni, timeout)
+                futures_map[fut] = idx
+            elif n.get("type") == "auto_balancer":
+                node_copies[idx]["ping"] = 1
+
+        for fut in as_completed(futures_map):
+            idx = futures_map[fut]
+            try:
+                lat = fut.result()
+                node_copies[idx]["ping"] = int(lat) if lat is not None else None
+            except Exception:
+                node_copies[idx]["ping"] = None
+
+    return node_copies

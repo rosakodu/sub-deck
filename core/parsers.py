@@ -503,11 +503,50 @@ def parse_xray_json_nodes(content: bytes) -> List[Dict[str, Any]]:
                             port = int(vnext[0].get("port", port))
                             break
 
+            uuid = ""
+            flow = ""
+            security = "none"
+            sni = ""
+            pbk = ""
+            sid = ""
+            spx = ""
+            fp = "chrome"
+            transport = "tcp"
+
+            if proxy_obs:
+                p0 = proxy_obs[0]
+                st = p0.get("streamSettings", {})
+                transport = st.get("network", "tcp")
+                security = st.get("security", "none")
+                reality_cfg = st.get("realitySettings", {})
+                tls_cfg = st.get("tlsSettings", {})
+                sni = reality_cfg.get("serverName") or tls_cfg.get("serverName", "")
+                fp = reality_cfg.get("fingerprint") or tls_cfg.get("fingerprint", "chrome")
+                pbk = reality_cfg.get("publicKey", "")
+                sid = reality_cfg.get("shortId", "")
+                spx = reality_cfg.get("spiderX", "")
+
+                vnext = p0.get("settings", {}).get("vnext", [])
+                if vnext:
+                    users = vnext[0].get("users", [])
+                    if users:
+                        uuid = users[0].get("id", "")
+                        flow = users[0].get("flow", "")
+
             nodes.append({
                 "type": proto,
                 "name": remarks,
                 "server": server,
                 "port": port,
+                "uuid": uuid,
+                "flow": flow,
+                "security": security,
+                "sni": sni,
+                "pbk": pbk,
+                "sid": sid,
+                "spx": spx,
+                "fp": fp,
+                "transport": transport,
                 "raw_config": item,
             })
         return nodes

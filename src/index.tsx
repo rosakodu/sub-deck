@@ -44,6 +44,8 @@ const exportLogs = callable<[], string>("export_logs");
 const getClipboard = callable<[], string>("get_clipboard");
 const getDesktopStatus = callable<[], { installed: boolean; autostart: boolean; enabled?: boolean }>("get_desktop_status");
 const setDesktopAutostart = callable<[enable: boolean], boolean>("set_desktop_autostart");
+const pingNodes = callable<[], NodeConfig[]>("ping_nodes");
+const getRealDelay = callable<[], { success: boolean; delay_ms: number }>("get_real_delay");
 
 const PRESET_OPTIONS: Array<{ key: string; labelKey: TranslationKeys }> = [
   { key: "default", labelKey: "presetDefault" },
@@ -71,6 +73,8 @@ function Content() {
   const [presetExpanded, setPresetExpanded] = useState<boolean>(false);
   const [trayAutostart, setTrayAutostart] = useState<boolean>(true);
   const [subMetadata, setSubMetadata] = useState<Record<string, SubscriptionMetadata>>({});
+  const [isPinging, setIsPinging] = useState(false);
+  const [realDelay, setRealDelay] = useState<number | null>(null);
 
   // Localization translator
   const t = useCallback(
@@ -268,6 +272,27 @@ function Content() {
       toaster.toast({ title: t("error"), body: `${err}` });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleCheckPing = async () => {
+    if (isPinging) return;
+    setIsPinging(true);
+    try {
+      const raw = await pingNodes();
+      if (Array.isArray(raw) && raw.length > 0) {
+        setNodes(raw);
+      }
+      if (connected) {
+        const delayData = await getRealDelay();
+        if (delayData?.success && delayData?.delay_ms) {
+          setRealDelay(delayData.delay_ms);
+        }
+      }
+    } catch (err) {
+      console.error("handleCheckPing error:", err);
+    } finally {
+      setIsPinging(false);
     }
   };
 
@@ -614,7 +639,7 @@ function Content() {
                     {connected && selectedNode && selectedNode.subscription_url === url && (
                       <PanelSectionRow>
                         <div style={{ color: "#1a9fff", fontWeight: "bold", padding: "4px 0", fontSize: "12px" }}>
-                          {t("selectedServer", { name: selectedNode.name })}
+                          {t("selectedServer", { name: selectedNode.name }) + (realDelay ? ` • ${realDelay} ms` : "")}
                         </div>
                       </PanelSectionRow>
                     )}
@@ -631,6 +656,16 @@ function Content() {
                         </ButtonItem>
                       </PanelSectionRow>
                     )}
+
+                    <PanelSectionRow>
+                      <ButtonItem
+                        layout="below"
+                        onClick={handleCheckPing}
+                        disabled={loading || isPinging}
+                      >
+                        {isPinging ? (lang === "russian" ? "⚡ Измерение пинга..." : "⚡ Measuring Ping...") : (lang === "russian" ? "⚡ Проверить пинг" : "⚡ Check Ping")}
+                      </ButtonItem>
+                    </PanelSectionRow>
 
                     {/* Кнопка Удалить */}
                     <PanelSectionRow>

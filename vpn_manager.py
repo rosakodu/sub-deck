@@ -546,12 +546,14 @@ class VPNManager:
                     addr = vnext.get("address")
                     if addr:
                         resolved = resolve_host(addr) or addr
+                        vnext["address"] = resolved
                         if resolved and resolved not in server_ips:
                             server_ips.append(resolved)
                 for srv in settings.get("servers", []):
                     addr = srv.get("address")
                     if addr:
                         resolved = resolve_host(addr) or addr
+                        srv["address"] = resolved
                         if resolved and resolved not in server_ips:
                             server_ips.append(resolved)
 
@@ -601,20 +603,33 @@ class VPNManager:
                     "outboundTag": "direct"
                 })
 
-            has_port_53_rule = any(r.get("port") in ("53", 53) for r in rules)
-            if not has_port_53_rule:
-                dns_outbound_tag = "proxy"
-                for ob in config_data.get("outbounds", []):
-                    tag = ob.get("tag")
-                    net = ob.get("streamSettings", {}).get("network", "tcp")
-                    if tag in ("proxy", "proxy-2", "direct") and net != "xhttp":
-                        dns_outbound_tag = tag
-                        break
-                rules.insert(0, {
-                    "type": "field",
-                    "port": "53",
-                    "outboundTag": dns_outbound_tag
+            # Remove any existing port 53 rule to avoid loop or blocked UDP
+            rules[:] = [r for r in rules if r.get("port") not in ("53", 53)]
+
+            # Ensure dns-out outbound exists
+            if not any(ob.get("tag") == "dns-out" for ob in config_data.get("outbounds", [])):
+                config_data.setdefault("outbounds", []).append({
+                    "tag": "dns-out",
+                    "protocol": "dns"
                 })
+
+            # Route incoming DNS queries from socks-in to dns-out
+            rules.insert(0, {
+                "type": "field",
+                "inboundTag": ["socks-in", "socks"],
+                "port": "53",
+                "outboundTag": "dns-out"
+            })
+
+            # Configure Xray DNS with remote DoH over TCP/TLS inside the proxy (direct IP bootstrap)
+            config_data["dns"] = {
+                "servers": [
+                    "https://1.1.1.1/dns-query",
+                    "https://1.0.0.1/dns-query",
+                    "https://8.8.8.8/dns-query"
+                ],
+                "queryStrategy": "UseIPv4"
+            }
 
             with open(self.config_path, "w", encoding="utf-8") as f:
                 json.dump(config_data, f, indent=2)
@@ -899,8 +914,12 @@ class VPNManager:
             self.save_settings(settings)
 
     def is_running(self) -> bool:
-        """Verifies if (xray OR sing-box) AND tun2socks processes are actively running."""
-        # Fast path: check in-memory process objects first (zero subprocess overhead)
+        """Verifies if VPN tunnel is actively running."""
+        # 1. Interface check: if tun0 doesn't exist in kernel, VPN is definitely not active
+        if not os.path.exists(f"/sys/class/net/{TUN_INTERFACE}"):
+            return False
+
+        # 2. Check process handles
         tun_alive = self.tun_process is not None and self.tun_process.poll() is None
         core_alive = (
             (self.xray_process is not None and self.xray_process.poll() is None) or
@@ -909,24 +928,12 @@ class VPNManager:
         if tun_alive and core_alive:
             return True
 
-        # Fallback: check system processes if handles are not active or after plugin reload
+        # 3. Fallback: check exact process names
         try:
-            tun_check = subprocess.run(
-                ["pgrep", "-f", "tun2socks"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=0.5,
-            )
-            if tun_check.returncode != 0:
-                return False
-
-            core_check = subprocess.run(
-                ["pgrep", "-f", "xray|sing-box"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=0.5,
-            )
-            return core_check.returncode == 0
+            tun_check = subprocess.run(["pgrep", "-x", "tun2socks"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.5)
+            xray_check = subprocess.run(["pgrep", "-x", "xray"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.5)
+            sb_check = subprocess.run(["pgrep", "-x", "sing-box"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.5)
+            return tun_check.returncode == 0 and (xray_check.returncode == 0 or sb_check.returncode == 0)
         except Exception:
             return False
 

@@ -285,6 +285,27 @@ class Plugin:
     async def get_nodes(self) -> list:
         return self.vpn.get_nodes()
 
+    async def ping_nodes(self) -> list:
+        """Pings all nodes in parallel, updates cached nodes with new ping values, and returns updated nodes."""
+        from core.pinger import ping_all_nodes
+        nodes = self.vpn.load_nodes()
+        real_nodes = [n for n in nodes if n.get("type") != "auto_balancer"]
+        updated_real = await self.loop.run_in_executor(
+            None, lambda: ping_all_nodes(real_nodes, timeout=2.0)
+        )
+        await self.loop.run_in_executor(
+            None, lambda: self.vpn.save_nodes(updated_real, force=True)
+        )
+        return self.vpn.get_nodes()
+
+    async def get_real_delay(self) -> dict:
+        """Measures real end-to-end HTTP 204 latency through current connection (active TUN)."""
+        from core.pinger import http_url_test
+        delay = await self.loop.run_in_executor(
+            None, lambda: http_url_test(timeout=3.0)
+        )
+        return {"success": delay is not None, "delay_ms": int(delay) if delay else None}
+
     async def connect_node(self, node: dict) -> bool:
         success = await self.loop.run_in_executor(None, self.vpn.start, node)
         decky.logger.info(f"connect_node '{node.get('name')}': success={success}")
