@@ -4,8 +4,10 @@ VLESS, VMess, Trojan, Shadowsocks, Hysteria 2.
 """
 
 import base64
+import hashlib
 import http.client
 import json
+import os
 import re
 import socket
 import ssl
@@ -591,6 +593,27 @@ def parse_node_link(link: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+def get_device_hwid() -> str:
+    """
+    Returns a persistent 32-character hexadecimal Hardware ID (HWID).
+    Derives from /etc/machine-id or /var/lib/dbus/machine-id, falling back to a hashed hostname.
+    """
+    candidates = ["/etc/machine-id", "/var/lib/dbus/machine-id"]
+    for path in candidates:
+        try:
+            if os.path.isfile(path):
+                with open(path, "r", encoding="utf-8") as f:
+                    val = f.read().strip()
+                    if val and len(val) >= 16:
+                        return val.lower()
+        except Exception:
+            continue
+
+    # Fallback: stable SHA-256 slice from hostname + user
+    raw = f"{socket.gethostname()}-subdeck-steamdeck".encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()[:32]
+
+
 def is_proxy_reachable(host: str = DEFAULT_SOCKS_HOST, port: int = DEFAULT_SOCKS_PORT, timeout: float = 0.5) -> bool:
     """Checks whether local proxy daemon is actively listening on host:port."""
     try:
@@ -606,11 +629,19 @@ def download_subscription_payload(url: str, timeout: float = 15.0) -> Tuple[Opti
         return None, None
 
     ctx = ssl._create_unverified_context()
+    hwid = get_device_hwid()
+    base_headers = {
+        "x-hwid": hwid,
+        "x-device-os": "Linux",
+        "x-device-model": "SteamDeck",
+    }
 
     # 1. Direct download attempt
     for ua in SUBSCRIPTION_USER_AGENTS:
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": ua})
+            headers = dict(base_headers)
+            headers["User-Agent"] = ua
+            req = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
                 return resp.read(), resp.info()
         except Exception:
@@ -669,7 +700,9 @@ def download_subscription_payload(url: str, timeout: float = 15.0) -> Tuple[Opti
             socks_opener = urllib.request.build_opener(SOCKSHandler(context=ctx))
             for ua in SUBSCRIPTION_USER_AGENTS:
                 try:
-                    req = urllib.request.Request(url, headers={"User-Agent": ua})
+                    headers = dict(base_headers)
+                    headers["User-Agent"] = ua
+                    req = urllib.request.Request(url, headers=headers)
                     with socks_opener.open(req, timeout=timeout) as resp:
                         return resp.read(), resp.info()
                 except Exception:
