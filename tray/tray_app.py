@@ -434,18 +434,51 @@ class SubDeckTrayApp:
             print(f"[SubDeckTray] Note: could not claim well-known D-Bus name: {e}")
 
         # Register StatusNotifierItem with KDE Plasma StatusNotifierWatcher
+        self._is_registered_with_watcher = False
+        self._register_with_watcher()
+
+        # Listen for KDE Plasma StatusNotifierWatcher coming online or restarting
         try:
-            watcher = self.session_bus.get_object('org.kde.StatusNotifierWatcher', '/StatusNotifierWatcher')
-            watcher_iface = dbus.Interface(watcher, 'org.kde.StatusNotifierWatcher')
-            watcher_iface.RegisterStatusNotifierItem(self.session_bus.get_unique_name())
+            self.session_bus.add_signal_receiver(
+                self._on_dbus_name_owner_changed,
+                signal_name='NameOwnerChanged',
+                dbus_interface='org.freedesktop.DBus'
+            )
         except Exception as e:
-            print(f"[SubDeckTray] StatusNotifierWatcher warning (will retry): {e}")
+            print(f"[SubDeckTray] Could not add NameOwnerChanged listener: {e}")
+
+        # Periodic watcher retry check every 5 seconds until confirmed
+        GLib.timeout_add(5000, self._on_watcher_retry_timer)
 
         # Start periodic status polling (every 2.5 seconds)
         GLib.timeout_add(2500, self._on_poll_timer)
 
         # Trigger initial poll immediately
         self._trigger_background_poll()
+
+    def _register_with_watcher(self) -> bool:
+        """Registers the StatusNotifierItem on org.kde.StatusNotifierWatcher if available."""
+        try:
+            watcher = self.session_bus.get_object('org.kde.StatusNotifierWatcher', '/StatusNotifierWatcher')
+            watcher_iface = dbus.Interface(watcher, 'org.kde.StatusNotifierWatcher')
+            watcher_iface.RegisterStatusNotifierItem(self.session_bus.get_unique_name())
+            self._is_registered_with_watcher = True
+            return True
+        except Exception as e:
+            self._is_registered_with_watcher = False
+            return False
+
+    def _on_watcher_retry_timer(self) -> bool:
+        """Periodically ensures registration with StatusNotifierWatcher when entering Desktop Mode."""
+        if not self._is_registered_with_watcher:
+            self._register_with_watcher()
+        return True
+
+    def _on_dbus_name_owner_changed(self, name, old_owner, new_owner):
+        """Re-registers StatusNotifierItem whenever KDE Plasma StatusNotifierWatcher starts up."""
+        if name == 'org.kde.StatusNotifierWatcher' and new_owner:
+            print("[SubDeckTray] StatusNotifierWatcher appeared on D-Bus, registering StatusNotifierItem...")
+            self._register_with_watcher()
 
     def _send_desktop_notification(self, title: str, message: str, timeout_ms: int = 4000) -> int:
         """Sends native desktop notification via org.freedesktop.Notifications using replaces_id."""

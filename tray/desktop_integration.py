@@ -198,7 +198,7 @@ def get_desktop_integration_status(plugin_dir: str) -> Dict[str, Any]:
 
 
 def kill_tray_process(plugin_dir: Optional[str] = None) -> bool:
-    """Terminates any running tray_app.py instances via systemd user unit and pkill fallback."""
+    """Terminates any running tray_app.py instances via systemd user unit and process kill."""
     user_home = get_user_home()
     user_name = os.path.basename(user_home) or "deck"
 
@@ -213,13 +213,21 @@ def kill_tray_process(plugin_dir: Optional[str] = None) -> bool:
     try:
         if os.geteuid() == 0:
             subprocess.run(
-                ["sudo", "-u", user_name, "env", f"XDG_RUNTIME_DIR=/run/user/{uid}", "systemctl", "--user", "stop", "sub-deck-tray.service"],
+                ["sudo", "-u", user_name, "env", f"XDG_RUNTIME_DIR=/run/user/{uid}", f"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus", "systemctl", "--user", "stop", "sub-deck-tray.service"],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3
+            )
+            subprocess.run(
+                ["sudo", "-u", user_name, "env", f"XDG_RUNTIME_DIR=/run/user/{uid}", f"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus", "systemctl", "--user", "reset-failed", "sub-deck-tray.service"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2
             )
         else:
             subprocess.run(
                 ["systemctl", "--user", "stop", "sub-deck-tray.service"],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3
+            )
+            subprocess.run(
+                ["systemctl", "--user", "reset-failed", "sub-deck-tray.service"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2
             )
     except Exception:
         pass
@@ -230,6 +238,20 @@ def kill_tray_process(plugin_dir: Optional[str] = None) -> bool:
             script_path = os.path.abspath(os.path.join(plugin_dir, "tray", "tray_app.py"))
             subprocess.run(["pkill", "-f", script_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         subprocess.run(["pkill", "-f", "tray/tray_app.py"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        # Allow processes up to 1 second to release locks and exit gracefully
+        for _ in range(5):
+            res = subprocess.run(["pgrep", "-f", "tray/tray_app.py"], stdout=subprocess.PIPE)
+            if not (res.returncode == 0 and res.stdout.strip()):
+                break
+            time.sleep(0.2)
+        else:
+            # Force kill if still holding lock
+            if plugin_dir:
+                script_path = os.path.abspath(os.path.join(plugin_dir, "tray", "tray_app.py"))
+                subprocess.run(["pkill", "-9", "-f", script_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["pkill", "-9", "-f", "tray/tray_app.py"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
         return True
     except Exception:
         return False
@@ -238,7 +260,7 @@ def kill_tray_process(plugin_dir: Optional[str] = None) -> bool:
 def launch_tray_process(plugin_dir: str) -> bool:
     """
     Launches tray_app.py in the user's graphical desktop session.
-    Uses 'systemd-run --user --unit=sub-deck-tray' with fallback to subprocess.Popen.
+    Uses 'systemctl --user start sub-deck-tray.service' with fallback to subprocess.Popen.
     Ensures the tray process survives Decky session changes and desktop switching.
     """
     script_path = os.path.abspath(os.path.join(plugin_dir, "tray", "tray_app.py"))
@@ -270,16 +292,7 @@ def launch_tray_process(plugin_dir: str) -> bool:
     display = os.environ.get("DISPLAY", ":0")
     wayland_display = os.environ.get("WAYLAND_DISPLAY", "wayland-0")
 
-    # 1. Try launching via systemd-run --user (prevents process termination on session changes)
-    systemd_cmd = [
-        "systemd-run",
-        "--user",
-        "--unit=sub-deck-tray",
-        f"--setenv=DISPLAY={display}",
-        f"--setenv=WAYLAND_DISPLAY={wayland_display}",
-        "python3", script_path
-    ]
-
+    # 1. Try launching via systemctl --user start sub-deck-tray.service
     try:
         if os.geteuid() == 0:
             res = subprocess.run(
@@ -288,23 +301,29 @@ def launch_tray_process(plugin_dir: str) -> bool:
                     "env",
                     f"XDG_RUNTIME_DIR=/run/user/{uid}",
                     f"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus",
-                ] + systemd_cmd,
+                    "systemctl", "--user", "start", "sub-deck-tray.service"
+                ],
                 capture_output=True,
                 timeout=5
             )
         else:
-            res = subprocess.run(systemd_cmd, capture_output=True, timeout=5)
+            res = subprocess.run(
+                ["systemctl", "--user", "start", "sub-deck-tray.service"],
+                capture_output=True,
+                timeout=5
+            )
 
         if res.returncode == 0:
             return True
     except Exception as e:
-        print(f"[SubDeckDesktop] systemd-run error, falling back to direct spawn: {e}")
+        print(f"[SubDeckDesktop] systemctl user service start error: {e}")
 
-    # 2. Fallback to direct subprocess.Popen
+    # 2. Fallback to direct subprocess.Popen with proper env
     cmd = ["python3", script_path]
     if os.geteuid() == 0:
         cmd = [
             "sudo", "-u", user_name,
+            "env",
             f"DISPLAY={display}",
             f"WAYLAND_DISPLAY={wayland_display}",
             f"XDG_RUNTIME_DIR=/run/user/{uid}",
