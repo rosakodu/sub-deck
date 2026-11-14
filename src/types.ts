@@ -75,5 +75,7 @@ export type TranslationKeys =
   | "clipboardEmptyOrBlocked"
   | "desktopTitle"
   | "desktopTrayToggle"
-  | "desktopTrayToggleDesc";
+  | "desktopTrayToggleDesc"
+  | "confirmAddBtn"
+  | "cancelBtn";
 

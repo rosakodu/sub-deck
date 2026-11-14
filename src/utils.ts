@@ -18,13 +18,13 @@ export function getDomainLabel(url: string, lang: string): string {
     return "igareck Subscription";
   }
   if (url.toLowerCase().includes("avencores/goida-vpn-configs") || url.includes("goida-vpn-configs")) {
-    if (lang === "russian") return "Подписка Goida VPN AvenCores";
-    if (lang === "schinese") return "Goida VPN AvenCores 订阅";
-    if (lang === "tchinese") return "Goida VPN AvenCores 訂閱";
-    if (lang === "arabic") return "اشتراك Goida VPN AvenCores";
-    if (lang === "persian" || lang === "farsi") return "اشتراک Goida VPN AvenCores";
-    if (lang === "turkish") return "Goida VPN AvenCores Aboneliği";
-    return "Goida VPN AvenCores Subscription";
+    if (lang === "russian") return "Подписка Goida VPN";
+    if (lang === "schinese") return "Goida VPN 订阅";
+    if (lang === "tchinese") return "Goida VPN 訂閱";
+    if (lang === "arabic") return "اشتراك Goida VPN";
+    if (lang === "persian" || lang === "farsi") return "اشتراک Goida VPN";
+    if (lang === "turkish") return "Goida VPN Aboneliği";
+    return "Goida VPN Subscription";
   }
   if (url.includes("zieng2/wl")) {
     if (lang === "russian") return "Подписка zieng2";

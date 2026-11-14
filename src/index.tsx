@@ -7,13 +7,15 @@ import {
   Navigation,
   Focusable,
   staticClasses,
+  showModal,
+  ConfirmModal,
 } from "@decky/ui";
 import {
   callable,
   definePlugin,
   toaster,
 } from "@decky/api";
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { FC, useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { FaNetworkWired, FaClipboard } from "react-icons/fa";
 
 import { NodeConfig, TranslationKeys, SubscriptionMetadata, Settings } from "./types";
@@ -60,9 +62,108 @@ function unwrap<T>(payload: any): T {
     : payload;
 }
 
+interface AddSubscriptionModalProps {
+  closeModal?: () => void;
+  onAdd: (url: string) => Promise<boolean | void>;
+  t: (key: TranslationKeys, params?: Record<string, string | number>) => string;
+}
+
+const AddSubscriptionModal: FC<AddSubscriptionModalProps> = ({ closeModal, onAdd, t }) => {
+  const [url, setUrl] = useState<string>("");
+  const [submitting, setSubmitting] = useState<boolean>(false);
+  const submittingRef = useRef<boolean>(false);
+
+  const handlePaste = async () => {
+    if (submitting || submittingRef.current) return;
+    const pastedText = await readClipboardText(getClipboard);
+    if (pastedText) {
+      setUrl(pastedText.trim());
+      toaster.toast({
+        title: t("success"),
+        body: t("pastedFromClipboard"),
+      });
+    } else {
+      toaster.toast({
+        title: t("toastWarning"),
+        body: t("clipboardEmptyOrBlocked"),
+      });
+    }
+  };
+
+  const handleConfirm = async () => {
+    if (submitting || submittingRef.current) return;
+    const trimmed = url.trim();
+    if (!trimmed) {
+      toaster.toast({ title: t("error"), body: t("subUrlLabel") });
+      return;
+    }
+    submittingRef.current = true;
+    setSubmitting(true);
+    try {
+      const ok = await onAdd(trimmed);
+      if (ok !== false) {
+        closeModal?.();
+      }
+    } catch (err) {
+      console.error("Add subscription modal error:", err);
+    } finally {
+      submittingRef.current = false;
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <ConfirmModal
+      {...({ bCloseAfterOK: false } as any)}
+      strTitle={t("addSubBtn")}
+      strOKButtonText={t("confirmAddBtn")}
+      strCancelButtonText={t("cancelBtn")}
+      bOKDisabled={submitting || !url.trim()}
+      bCancelDisabled={submitting}
+      onOK={handleConfirm}
+      onCancel={closeModal}
+      closeModal={closeModal}
+      onEscKeypress={closeModal}
+    >
+      <style>{PASTE_BUTTON_CSS}</style>
+      <div style={{ display: "flex", flexDirection: "column", gap: "10px", width: "100%", padding: "10px 0" }}>
+        <div style={{ fontSize: "12px", color: "#a5a5a5", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+          {t("subUrlLabel")}
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", width: "100%" }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <TextField
+              value={url}
+              disabled={submitting}
+              onChange={(e: any) => setUrl(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (url.trim() && !submitting && !submittingRef.current) {
+                    handleConfirm();
+                  }
+                }
+              }}
+              focusOnMount
+            />
+          </div>
+          <Focusable
+            className="paste-btn-clean"
+            onClick={submitting ? undefined : handlePaste}
+            onActivate={submitting ? undefined : handlePaste}
+            style={submitting ? { opacity: 0.5, pointerEvents: "none" } : undefined}
+          >
+            <FaClipboard size={14} />
+          </Focusable>
+        </div>
+      </div>
+    </ConfirmModal>
+  );
+};
+
 function Content() {
   const [lang, setLang] = useState<string>("english");
-  const [inputUrl, setInputUrl] = useState<string>("");
   const [subscriptions, setSubscriptions] = useState<string[]>([]);
   const [nodes, setNodes] = useState<NodeConfig[]>([]);
   const [selectedNode, setSelectedNode] = useState<NodeConfig | null>(null);
@@ -75,6 +176,7 @@ function Content() {
   const [subMetadata, setSubMetadata] = useState<Record<string, SubscriptionMetadata>>({});
   const [isPinging, setIsPinging] = useState(false);
   const [realDelay, setRealDelay] = useState<number | null>(null);
+  const isModalOpenRef = useRef<boolean>(false);
 
   // Localization translator
   const t = useCallback(
@@ -199,7 +301,6 @@ function Content() {
       const raw = await addFreeSubscriptions();
       const fetchedNodes = unwrap<NodeConfig[]>(raw) || [];
       setNodes(Array.isArray(fetchedNodes) ? fetchedNodes : []);
-      setInputUrl("");
       toaster.toast({
         title: t("success"),
         body: t("freeConfigsUpdated"),
@@ -212,32 +313,56 @@ function Content() {
     }
   };
 
-  const handleAddSubscription = async () => {
-    if (!inputUrl) {
+  const handleAddSubscription = async (urlToAdd: string) => {
+    if (!urlToAdd) {
       toaster.toast({ title: t("error"), body: t("subUrlLabel") });
-      return;
+      return false;
     }
     setLoading(true);
     try {
-      const raw = await addSubscription(inputUrl);
+      const raw = await addSubscription(urlToAdd);
       const fetchedNodes = unwrap<NodeConfig[]>(raw) || [];
       const nodeArray = Array.isArray(fetchedNodes) ? fetchedNodes : [];
 
       setNodes(nodeArray);
-      setInputUrl("");
       await refreshSubscriptions();
 
-      const isFree = isFreeSubscriptionUrl(inputUrl);
-      const addedCount = nodeArray.filter((n) => n.subscription_url === inputUrl).length;
+      const isFree = isFreeSubscriptionUrl(urlToAdd);
+      const addedCount = nodeArray.filter((n) => n.subscription_url === urlToAdd).length;
       toaster.toast({
         title: t("success"),
         body: isFree ? t("freeConfigsUpdated") : t("loadedNodesForSub", { count: addedCount }),
       });
+      return true;
     } catch (err) {
       toaster.toast({ title: t("error"), body: `${err}` });
+      return false;
     } finally {
       setLoading(false);
     }
+  };
+
+  const openAddSubscriptionModal = () => {
+    if (isModalOpenRef.current) return;
+    isModalOpenRef.current = true;
+
+    let modalResult: any = null;
+    const closeModal = () => {
+      isModalOpenRef.current = false;
+      if (modalResult?.Close) {
+        modalResult.Close();
+      }
+    };
+
+    modalResult = showModal(
+      <AddSubscriptionModal
+        closeModal={closeModal}
+        onAdd={handleAddSubscription}
+        t={t}
+      />,
+      undefined,
+      { fnOnClose: closeModal }
+    );
   };
 
   const handleDeleteSubscription = async (urlToDelete: string) => {
@@ -388,23 +513,6 @@ function Content() {
     }
   };
 
-  const handlePasteFromClipboard = async () => {
-    const pastedText = await readClipboardText(getClipboard);
-
-    if (pastedText) {
-      setInputUrl(pastedText);
-      toaster.toast({
-        title: t("success"),
-        body: t("pastedFromClipboard"),
-      });
-    } else {
-      toaster.toast({
-        title: t("toastWarning"),
-        body: t("clipboardEmptyOrBlocked"),
-      });
-    }
-  };
-
   return (
     <PanelSection title={t("title")}>
       {/* Выбор пресета маршрутизации */}
@@ -474,36 +582,11 @@ function Content() {
         )}
       </PanelSection>
 
-      <style>{PASTE_BUTTON_CSS}</style>
-
-      {/* Поле ввода URL подписки */}
-      <PanelSectionRow>
-        <div style={{ display: "flex", flexDirection: "column", width: "100%" }}>
-          <div style={{ fontSize: "11px", fontWeight: "bold", color: "#a5a5a5", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "6px" }}>
-            {t("subUrlLabel")}
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: "8px", width: "100%" }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <TextField
-                value={inputUrl}
-                onChange={(e: any) => setInputUrl(e.target.value)}
-              />
-            </div>
-            <Focusable
-              className="paste-btn-clean"
-              onClick={handlePasteFromClipboard}
-              onActivate={handlePasteFromClipboard}
-            >
-              <FaClipboard size={14} />
-            </Focusable>
-          </div>
-        </div>
-      </PanelSectionRow>
-
+      {/* Кнопка добавления подписки через модальное окно */}
       <PanelSectionRow>
         <ButtonItem
           layout="below"
-          onClick={handleAddSubscription}
+          onClick={openAddSubscriptionModal}
           disabled={loading}
         >
           {loading ? t("updating") : t("addSubBtn")}
@@ -556,11 +639,24 @@ function Content() {
                     onClick={() => setExpandedSubs((prev) => ({ ...prev, [url]: !prev[url] }))}
                   >
                     <div style={{ display: "flex", flexDirection: "column", width: "100%", gap: "4px" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
-                        <span style={{ fontSize: "12px", fontWeight: "bold", color: "#e0e0e0", textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", minWidth: 0 }}>
+                        <span
+                          style={{
+                            fontSize: "12px",
+                            fontWeight: "bold",
+                            color: "#e0e0e0",
+                            textAlign: "left",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                            flex: 1,
+                            minWidth: 0,
+                          }}
+                          title={domainLabel}
+                        >
                           {domainLabel}
                         </span>
-                        <span style={{ fontSize: "10px", color: "#888", marginLeft: "6px" }}>
+                        <span style={{ fontSize: "10px", color: "#888", marginLeft: "6px", flexShrink: 0 }}>
                           {isExpanded ? "▼" : "▶"}
                         </span>
                       </div>
