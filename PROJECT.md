@@ -48,3 +48,7 @@
    - Обновлены метаданные и названия генерируемых нод в `vpn_manager.py` и `core/warp_generator.py` (`🛡️ Warp Generation (QUIC)`, `🛡️ Warp Generation (AWG 2.0)`, `🛡️ Warp Generation (SIP)`).
    - Внутренний идентификатор (`amnezia_warp`) сохранен без изменений для совместимости.
    - Фронтенд пересобран, плагин развернут на Steam Deck, кэш настроек и нод обновлен.
+12. [x] **Пакет серверов Red Shield VPN для переноса**:
+   - Упакованы 82 узла Red Shield (41 AWG + 41 VLESS Reality) в архив `redshield-deck-nodes.zip`.
+   - Написан авто-установщик `install.sh` и ярлык `.desktop` для установки в 1 клик без потери существующих подписок.
+   - Архив скопирован на рабочий стол и в папку «Загрузки» Steam Deck.
