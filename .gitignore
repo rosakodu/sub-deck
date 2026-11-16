@@ -58,3 +58,6 @@ cli/decky
 defaults/bin/
 open_projacktor.sh
 *.zip
+defaults/redshield_nodes.json
+*redshield_nodes*.json
+.agents/

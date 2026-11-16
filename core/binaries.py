@@ -6,6 +6,7 @@ Handles defaults restoration, downloads, and permission management.
 import os
 import shutil
 import ssl
+import subprocess
 import time
 import urllib.request
 import zipfile
@@ -167,22 +168,51 @@ def ensure_xray_and_tun(
     return True
 
 
+def check_singbox_has_awg(singbox_path: str) -> bool:
+    """Checks whether the sing-box binary has the with_awg tag in its version output."""
+    try:
+        res = subprocess.run(
+            [singbox_path, "version"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=5.0,
+        )
+        return "with_awg" in (res.stdout or "")
+    except Exception:
+        return False
+
+
 def ensure_singbox(
     bin_dir: str,
     singbox_path: str,
     log_func: Optional[Callable[[str], None]] = None,
     plugin_dir: Optional[str] = None,
 ) -> bool:
-    """Ensures sing-box binary is present and executable for Hysteria 2 and TUIC protocols."""
-    if is_executable(singbox_path):
-        return True
+    """Ensures sing-box binary is present, executable, and contains with_awg support."""
+    defaults_dir = (
+        os.path.join(plugin_dir, "defaults")
+        if plugin_dir
+        else os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "defaults")
+    )
+    default_singbox = os.path.join(defaults_dir, "bin", "sing-box")
 
-    # 1. Try copying from plugin defaults
-    if plugin_dir:
-        default_singbox = os.path.join(plugin_dir, "defaults", "bin", "sing-box")
+    if is_executable(singbox_path):
+        if check_singbox_has_awg(singbox_path):
+            return True
+        if log_func:
+            log_func("sing-box binary lacks with_awg tag; replacing from plugin defaults...")
         if copy_from_defaults(default_singbox, singbox_path, make_executable=True):
             if log_func:
-                log_func("sing-box binary restored from plugin defaults.")
+                log_func("sing-box binary restored from plugin defaults with with_awg support.")
+            if check_singbox_has_awg(singbox_path):
+                return True
+
+    # 1. Try copying from plugin defaults
+    if copy_from_defaults(default_singbox, singbox_path, make_executable=True):
+        if log_func:
+            log_func("sing-box binary restored from plugin defaults.")
+        if check_singbox_has_awg(singbox_path):
             return True
 
     # 2. Remote download fallback
@@ -190,7 +220,7 @@ def ensure_singbox(
     from core.constants import SINGBOX_RELEASE_URL
     tar_path = os.path.join(bin_dir, "sing-box.tar.gz")
     if log_func:
-        log_func("Downloading sing-box binary for Hysteria 2 / TUIC protocols...")
+        log_func("Downloading sing-box binary for Hysteria 2 / TUIC / AWG protocols...")
     if download_file(SINGBOX_RELEASE_URL, tar_path, timeout=60.0):
         try:
             with tarfile.open(tar_path, "r:gz") as tar:

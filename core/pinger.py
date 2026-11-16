@@ -6,6 +6,7 @@ import time
 import socket
 import ssl
 import random
+import subprocess
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict, Optional, Any
@@ -30,6 +31,19 @@ def handshake_ping(host: str, port: int, sni: Optional[str] = None, timeout: flo
                 return (time.time() - start) * 1000.0
         return (time.time() - start) * 1000.0
     except Exception:
+        # Fallback to ICMP ping for UDP protocols (e.g. WireGuard / AWG)
+        try:
+            p_start = time.time()
+            res = subprocess.run(
+                ["ping", "-c", "1", "-W", str(int(timeout) or 1), host],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=timeout,
+            )
+            if res.returncode == 0:
+                return (time.time() - p_start) * 1000.0
+        except Exception:
+            pass
         return None
     finally:
         if s is not None:

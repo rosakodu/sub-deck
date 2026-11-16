@@ -291,9 +291,17 @@ class VPNManager:
                         n["name"] = clean_node_name(n.get("name", ""))
                         nodes.append(n)
 
-            # Separate WARP nodes and other nodes to put WARP right at the top
-            warp_nodes = [n for n in nodes if n.get("type") in ("warp", "wireguard") or n.get("subscription_url") == "cloudflare_warp"]
-            other_nodes = [n for n in nodes if n.get("type") not in ("warp", "wireguard") and n.get("subscription_url") != "cloudflare_warp"]
+            # Separate WARP/Amnezia WARP nodes and other nodes to put WARP right at the top
+            warp_nodes = [
+                n for n in nodes
+                if n.get("type") in ("warp", "wireguard")
+                or n.get("subscription_url") in ("cloudflare_warp", "amnezia_warp")
+            ]
+            other_nodes = [
+                n for n in nodes
+                if n.get("type") not in ("warp", "wireguard")
+                and n.get("subscription_url") not in ("cloudflare_warp", "amnezia_warp")
+            ]
             ordered_nodes = warp_nodes + other_nodes
 
             if len(ordered_nodes) > 1 and not any(n.get("type") == "auto_balancer" for n in ordered_nodes):
@@ -336,12 +344,18 @@ class VPNManager:
 
     def parse_subscription(self, url: str) -> tuple:
         """Fetches and parses a single subscription URL, returning (nodes, interval, metadata)."""
-        if url == "cloudflare_warp":
+        if url in ("cloudflare_warp", "amnezia_warp"):
             from core.warp_generator import generate_warp_identity
             res = generate_warp_identity(self.bin_dir, self.settings_dir, force=False, log_func=self.log)
             if res.get("success"):
-                return [res["node"]], None, {"name": "Cloudflare WARP (WireGuard)"}
-            return [], None, {"name": "Cloudflare WARP (WireGuard)"}
+                nodes = res.get("nodes") or ([res["node"]] if res.get("node") else [])
+                return nodes, None, {"name": "🛡️ Warp Generation"}
+            return [], None, {"name": "🛡️ Warp Generation"}
+
+        if url == "redshield_vpn":
+            from core.redshield import load_redshield_nodes, REDSHIELD_SUB_NAME
+            nodes = load_redshield_nodes(self.settings_dir, self.plugin_dir)
+            return nodes, None, {"name": REDSHIELD_SUB_NAME}
 
         res = parse_subscription_nodes(url, log_func=self.log)
         if len(res) == 3:
@@ -544,8 +558,8 @@ class VPNManager:
             self.log(f"Auto-balancer config written to {self.config_path} with {len(server_ips)} endpoints")
             return server_ips
 
-        # 2. Sing-box protocols (Hysteria 2 / TUIC v5 / WireGuard / WARP)
-        if node.get("type") in ("hysteria2", "hy2", "tuic", "wireguard", "warp"):
+        # 2. Sing-box protocols (Hysteria 2 / TUIC v5 / WireGuard / WARP / Amnezia AWG)
+        if node.get("type") in ("hysteria2", "hy2", "tuic", "wireguard", "warp", "awg"):
             server_host = node.get("server", "")
             server_ip = resolve_host(server_host) or server_host
             settings = self.load_settings()
@@ -722,7 +736,7 @@ class VPNManager:
         """
         self.stop()
 
-        is_singbox = node.get("type") in ("hysteria2", "hy2", "tuic", "wireguard", "warp")
+        is_singbox = node.get("type") in ("hysteria2", "hy2", "tuic", "wireguard", "warp", "awg")
         if is_singbox:
             if not ensure_singbox(self.bin_dir, self.singbox_path, log_func=self.log, plugin_dir=self.plugin_dir):
                 self.log("sing-box binary unavailable, aborting start.")
@@ -853,7 +867,16 @@ class VPNManager:
         run_command(["ip", "route", "replace", "default", "dev", TUN_INTERFACE, "metric", "1"])
 
         # Configure systemd-resolved DNS for tun0
-        run_command(["resolvectl", "dns", TUN_INTERFACE] + DNS_SERVERS)
+        node_dns = node.get("dns")
+        if node_dns:
+            if isinstance(node_dns, str):
+                dns_list = [d.strip() for d in node_dns.split(",") if d.strip()]
+            else:
+                dns_list = [str(d).strip() for d in node_dns if str(d).strip()]
+        else:
+            dns_list = DNS_SERVERS
+
+        run_command(["resolvectl", "dns", TUN_INTERFACE] + dns_list)
         run_command(["resolvectl", "domain", TUN_INTERFACE, "~."])
         run_command(["resolvectl", "default-route", TUN_INTERFACE, "yes"])
 
@@ -1022,34 +1045,42 @@ class VPNManager:
         return res
 
     def generate_warp_node(self, force: bool = True) -> Dict[str, Any]:
-        """Registers Cloudflare WARP device and updates node cache."""
+        """Registers Cloudflare account with AmneziaWG obfuscation and updates node cache."""
+        from core.binaries import ensure_singbox
+        ensure_singbox(self.bin_dir, self.singbox_path, log_func=self.log, plugin_dir=self.plugin_dir)
         from core.warp_generator import generate_warp_identity
         res = generate_warp_identity(self.bin_dir, self.settings_dir, force=force, log_func=self.log)
         if res.get("success"):
-            warp_node = res["node"]
+            warp_nodes = res.get("nodes") or ([res["node"]] if res.get("node") else [])
             settings = self.load_settings()
             subs = settings.get("subscriptions", [])
-            if "cloudflare_warp" not in subs:
-                subs.append("cloudflare_warp")
-                settings["subscriptions"] = subs
+            sub_key = "amnezia_warp"
+            # Cleanup legacy cloudflare_warp entry if present
+            if "cloudflare_warp" in subs:
+                subs = [s for s in subs if s != "cloudflare_warp"]
+            if sub_key not in subs:
+                subs.append(sub_key)
+            settings["subscriptions"] = subs
 
             meta = settings.get("subscription_metadata", {})
-            meta["cloudflare_warp"] = {
-                "name": "Cloudflare WARP (WireGuard)",
+            meta[sub_key] = {
+                "name": "🛡️ Warp Generation",
                 "upload": 0,
                 "download": 0,
                 "total": 0,
                 "expire": 0,
                 "last_updated": int(time.time()),
             }
+            if "cloudflare_warp" in meta:
+                del meta["cloudflare_warp"]
             settings["subscription_metadata"] = meta
             self.save_settings(settings)
 
             # Insert or replace in nodes
             nodes = self.load_nodes()
-            nodes = [n for n in nodes if n.get("subscription_url") != "cloudflare_warp"]
-            nodes.append(warp_node)
+            nodes = [n for n in nodes if n.get("subscription_url") not in ("cloudflare_warp", "amnezia_warp")]
+            nodes.extend(warp_nodes)
             self.save_nodes(nodes)
             res["nodes"] = self.get_nodes()
-            self.log("Cloudflare WARP node added to node cache.")
+            self.log(f"Warp Generation ({len(warp_nodes)} nodes) added to node cache.")
         return res

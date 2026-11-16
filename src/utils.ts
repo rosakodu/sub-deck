@@ -35,6 +35,12 @@ export function getDomainLabel(url: string, lang: string): string {
     if (lang === "turkish") return "zieng2 Aboneliği";
     return "zieng2 Subscription";
   }
+  if (url === "redshield_vpn") {
+    return "🛡️ Red Shield VPN";
+  }
+  if (url === "amnezia_warp" || url === "cloudflare_warp") {
+    return "🛡️ Warp Generation";
+  }
   try {
     const parsed = new URL(url);
     return parsed.hostname;
@@ -49,6 +55,10 @@ export function getNodeMethodLabel(node: NodeConfig): string {
   if (protocol === "SHADOWSOCKS") {
     const method = (node.method || "unknown").toUpperCase();
     return `${protocol}/${method}`;
+  }
+
+  if (protocol === "AWG" || protocol === "WIREGUARD" || protocol === "WARP") {
+    return `${protocol}/UDP`;
   }
 
   let transport = (node.transport || "tcp").toUpperCase();

@@ -34,6 +34,7 @@ import {
 const getSettings = callable<[], Settings>("get_settings");
 const addSubscription = callable<[url: string], NodeConfig[]>("add_subscription");
 const addFreeSubscriptions = callable<[], NodeConfig[]>("add_free_subscriptions");
+const generateWarpNode = callable<[], any>("generate_warp_node");
 const removeSubscription = callable<[url: string], NodeConfig[]>("remove_subscription");
 const updateSubscription = callable<[url: string], NodeConfig[]>("update_subscription");
 const savePreset = callable<[preset: string], boolean>("save_preset");
@@ -313,6 +314,27 @@ function Content() {
     }
   };
 
+  const handleGenerateWarp = async () => {
+    setLoading(true);
+    try {
+      const raw = await generateWarpNode();
+      const res = unwrap<any>(raw);
+      if (res && res.success) {
+        toaster.toast({
+          title: t("success"),
+          body: t("warpGeneratedSuccess"),
+        });
+        await refreshSubscriptions();
+      } else {
+        toaster.toast({ title: t("error"), body: res?.error || t("warpFailed") });
+      }
+    } catch (err) {
+      toaster.toast({ title: t("error"), body: `${err}` });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleAddSubscription = async (urlToAdd: string) => {
     if (!urlToAdd) {
       toaster.toast({ title: t("error"), body: t("subUrlLabel") });
@@ -490,6 +512,43 @@ function Content() {
     }
   };
 
+  const handleToggleConnect = async () => {
+    if (connected) {
+      setLoading(true);
+      try {
+        await disconnect();
+        setConnected(false);
+        toaster.toast({ title: t("tunnelStopped"), body: t("tunnelStoppedBody") });
+      } catch (err) {
+        toaster.toast({ title: t("error"), body: `${err}` });
+      } finally {
+        setLoading(false);
+      }
+    } else {
+      if (!selectedNode) {
+        toaster.toast({ title: t("toastWarning"), body: t("noNodeSelected") });
+        return;
+      }
+      setLoading(true);
+      try {
+        const rawSuccess = await connectNode(selectedNode);
+        const success = unwrap<boolean>(rawSuccess);
+        if (success) {
+          setConnected(true);
+          toaster.toast({ title: t("tunnelStarted"), body: t("tunnelStartedBody", { name: selectedNode.name }) });
+        } else {
+          toaster.toast({ title: t("error"), body: t("tunnelStartFailed") });
+          setConnected(false);
+        }
+      } catch (err) {
+        toaster.toast({ title: t("error"), body: `${err}` });
+        setConnected(false);
+      } finally {
+        setLoading(false);
+      }
+    }
+  };
+
   const handleExportLogs = async () => {
     setLoading(true);
     try {
@@ -515,6 +574,40 @@ function Content() {
 
   return (
     <PanelSection title={t("title")}>
+      {/* Кнопка Подключить / Отключить VPN */}
+      <PanelSectionRow>
+        <ButtonItem
+          layout="below"
+          onClick={handleToggleConnect}
+          disabled={loading}
+        >
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              width: "100%",
+              padding: "4px 0",
+              fontWeight: "bold",
+            }}
+          >
+            <span style={{ fontSize: "14px", color: connected ? "#ff6b6b" : "#4ade80" }}>
+              {connected ? `🔴 ${t("disconnectVpn")}` : `🟢 ${t("connectVpn")}`}
+            </span>
+            {selectedNode ? (
+              <span style={{ fontSize: "11px", fontWeight: "normal", color: "#a5a5a5", marginTop: "3px", textAlign: "center" }}>
+                {connected ? `${t("tunnelStarted")}: ${selectedNode.name}` : `${t("selectedServer")}: ${selectedNode.name}`}
+              </span>
+            ) : !connected ? (
+              <span style={{ fontSize: "11px", fontWeight: "normal", color: "#888", marginTop: "3px" }}>
+                {t("noNodeSelected")}
+              </span>
+            ) : null}
+          </div>
+        </ButtonItem>
+      </PanelSectionRow>
+
       {/* Выбор пресета маршрутизации */}
       <PanelSection>
         <PanelSectionRow>
@@ -600,6 +693,16 @@ function Content() {
           disabled={loading}
         >
           {t("addFreeBtn")}
+        </ButtonItem>
+      </PanelSectionRow>
+
+      <PanelSectionRow>
+        <ButtonItem
+          layout="below"
+          onClick={handleGenerateWarp}
+          disabled={loading}
+        >
+          {t("generateWarpBtn")}
         </ButtonItem>
       </PanelSectionRow>
 

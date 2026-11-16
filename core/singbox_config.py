@@ -68,16 +68,70 @@ def build_singbox_config(
     preset: str = PRESET_DEFAULT,
     iface: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Generates complete sing-box JSON configuration for Hysteria 2 / TUIC / Cloudflare WARP."""
+    """Generates complete sing-box JSON configuration for Hysteria 2 / TUIC / Cloudflare WARP / Amnezia AWG."""
     proto = node.get("type", "hysteria2").lower()
     is_warp = proto in ("warp", "wireguard")
+    is_awg = proto == "awg"
 
     direct_outbound: Dict[str, Any] = {"type": "direct", "tag": "direct"}
     if iface:
         direct_outbound["bind_interface"] = iface
 
     endpoints = []
-    if is_warp:
+    if is_awg:
+        local_addr = node.get("local_address", ["10.0.0.2/32"])
+        if isinstance(local_addr, str):
+            local_addr = [a.strip() for a in local_addr.split(",") if a.strip()]
+
+        awg_endpoint: Dict[str, Any] = {
+            "type": "awg",
+            "tag": "proxy",
+            "address": local_addr,
+            "private_key": node.get("private_key", ""),
+        }
+        if iface:
+            awg_endpoint["bind_interface"] = iface
+        if node.get("mtu"):
+            try:
+                awg_endpoint["mtu"] = int(node["mtu"])
+            except (ValueError, TypeError):
+                pass
+
+        for int_field in ("jc", "jmin", "jmax", "s1", "s2", "s3", "s4"):
+            val = node.get(int_field)
+            if val is not None and val != "":
+                try:
+                    awg_endpoint[int_field] = int(val)
+                except (ValueError, TypeError):
+                    pass
+
+        for str_field in ("h1", "h2", "h3", "h4", "i1", "i2", "i3", "i4", "i5"):
+            val = node.get(str_field)
+            if val is not None and val != "":
+                awg_endpoint[str_field] = str(val)
+
+        peer_allowed = node.get("allowed_ips", ["0.0.0.0/0", "::/0"])
+        if isinstance(peer_allowed, str):
+            peer_allowed = [a.strip() for a in peer_allowed.split(",") if a.strip()]
+
+        peer_pub = node.get("public_key") or node.get("peer_public_key", "")
+        peer_obj: Dict[str, Any] = {
+            "address": server_ip or node.get("server", ""),
+            "port": int(node.get("port", 51820)),
+            "public_key": peer_pub,
+            "allowed_ips": peer_allowed,
+        }
+        if node.get("preshared_key"):
+            peer_obj["preshared_key"] = node["preshared_key"]
+
+        awg_endpoint["peers"] = [peer_obj]
+        endpoints.append(awg_endpoint)
+
+        outbounds = [
+            direct_outbound,
+            {"type": "block", "tag": "block"},
+        ]
+    elif is_warp:
         wg_endpoint: Dict[str, Any] = {
             "type": "wireguard",
             "tag": "proxy",
@@ -110,9 +164,23 @@ def build_singbox_config(
             {"type": "block", "tag": "block"},
         ]
 
-    rules: List[Dict[str, Any]] = [
-        {"ip_is_private": True, "outbound": "direct"},
-    ]
+    rules: List[Dict[str, Any]] = []
+
+    # If AWG or WARP with internal/custom DNS, route DNS server IPs and port 53 to proxy FIRST
+    if is_warp or is_awg:
+        node_dns = node.get("dns") or ["10.254.254.254", "1.1.1.1"]
+        if isinstance(node_dns, str):
+            dns_ips = [d.strip() for d in node_dns.split(",") if d.strip()]
+        else:
+            dns_ips = [str(d).strip() for d in node_dns if str(d).strip()]
+        if dns_ips:
+            rules.append({
+                "ip_cidr": [f"{ip}/32" if "/" not in ip else ip for ip in dns_ips],
+                "outbound": "proxy",
+            })
+        rules.append({"port": [53], "outbound": "proxy"})
+
+    rules.append({"ip_is_private": True, "outbound": "direct"})
 
     if preset == PRESET_BYPASS_RU:
         rules.append({"domain_suffix": [".ru", ".su", ".xn--p1ai"] + RU_BYPASS_DOMAINS, "outbound": "direct"})
@@ -121,7 +189,7 @@ def build_singbox_config(
     elif preset == PRESET_ROSCOMVPN:
         rules.append({"domain_suffix": [".ru", ".su", ".xn--p1ai"] + RU_BYPASS_DOMAINS, "outbound": "direct"})
 
-    if is_warp:
+    if is_warp or is_awg:
         rules.append({"action": "route", "outbound": "proxy"})
 
     cfg: Dict[str, Any] = {
@@ -142,4 +210,22 @@ def build_singbox_config(
     }
     if endpoints:
         cfg["endpoints"] = endpoints
+        node_dns = node.get("dns") or ["10.254.254.254", "1.1.1.1"]
+        if isinstance(node_dns, str):
+            node_dns = [d.strip() for d in node_dns.split(",") if d.strip()]
+        primary_dns = node_dns[0] if node_dns else "10.254.254.254"
+
+        cfg["dns"] = {
+            "servers": [
+                {
+                    "tag": "remote-dns",
+                    "type": "udp",
+                    "server": primary_dns,
+                    "server_port": 53,
+                    "detour": "proxy",
+                }
+            ],
+            "strategy": "prefer_ipv4",
+        }
+        cfg["route"]["default_domain_resolver"] = "remote-dns"
     return cfg

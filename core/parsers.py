@@ -11,8 +11,10 @@ import os
 import re
 import socket
 import ssl
+import struct
 import urllib.parse
 import urllib.request
+import zlib
 from typing import Dict, List, Optional, Tuple, Any
 
 from core.constants import (
@@ -300,6 +302,516 @@ def parse_tuic_link(link: str) -> Optional[Dict[str, Any]]:
         }
     except Exception:
         return None
+
+
+def parse_wireguard_conf(conf_text: str, name: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """
+    Parses a WireGuard or AmneziaWG .conf INI format ([Interface] ... [Peer]).
+    Extracts addresses, keys, endpoint, and AmneziaWG obfuscation parameters
+    (Jc, Jmin, Jmax, S1-S4, H1-H4, I1-I5).
+    """
+    if not conf_text or not isinstance(conf_text, str):
+        return None
+
+    current_section = None
+    interface_params: Dict[str, str] = {}
+    peer_params: Dict[str, str] = {}
+    conf_name = name
+
+    for line in conf_text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+
+        is_comment = line.startswith("#") or line.startswith(";")
+        if is_comment:
+            clean = line.lstrip("#;").strip()
+            if "=" in clean:
+                c_key = clean.split("=", 1)[0].strip().lower()
+                if c_key in ("i1", "i2", "i3", "i4", "i5", "h1", "h2", "h3", "h4", "jc", "jmin", "jmax", "s1", "s2", "s3", "s4"):
+                    line = clean
+                    is_comment = False
+
+        if is_comment:
+            if not conf_name and (line.lower().startswith("# name") or line.lower().startswith("# description")):
+                if "=" in line:
+                    conf_name = line.split("=", 1)[1].strip()
+                elif ":" in line:
+                    conf_name = line.split(":", 1)[1].strip()
+            continue
+
+        if not ('<' in line and '>' in line) and not ('"' in line or "'" in line):
+            if "#" in line:
+                line = line.split("#", 1)[0].strip()
+            if ";" in line:
+                line = line.split(";", 1)[0].strip()
+
+        if line.startswith("[") and line.endswith("]"):
+            current_section = line[1:-1].strip().lower()
+            continue
+
+        if "=" in line and current_section:
+            key, val = line.split("=", 1)
+            key = key.strip().lower()
+            val = val.strip()
+            if current_section == "interface":
+                interface_params[key] = val
+            elif current_section == "peer":
+                peer_params[key] = val
+
+    priv_key = interface_params.get("privatekey") or interface_params.get("private_key")
+    pub_key = peer_params.get("publickey") or peer_params.get("public_key")
+    endpoint = peer_params.get("endpoint")
+
+    if not priv_key or not pub_key or not endpoint:
+        return None
+
+    host, port = parse_endpoint(endpoint)
+    addr_val = interface_params.get("address") or interface_params.get("ip") or "10.0.0.2/32"
+    local_addrs = [a.strip() for a in addr_val.split(",") if a.strip()]
+
+    allowed_val = peer_params.get("allowedips") or peer_params.get("allowed_ips") or "0.0.0.0/0, ::/0"
+    allowed_ips = [a.strip() for a in allowed_val.split(",") if a.strip()]
+
+    node: Dict[str, Any] = {
+        "type": "awg",
+        "name": conf_name or f"AWG {host}:{port}",
+        "server": host,
+        "port": port,
+        "private_key": priv_key,
+        "public_key": pub_key,
+        "local_address": local_addrs,
+        "allowed_ips": allowed_ips,
+    }
+
+    psk = peer_params.get("presharedkey") or peer_params.get("preshared_key")
+    if psk:
+        node["preshared_key"] = psk
+
+    mtu = interface_params.get("mtu") or peer_params.get("mtu")
+    if mtu:
+        try:
+            node["mtu"] = int(mtu)
+        except ValueError:
+            pass
+
+    dns = interface_params.get("dns")
+    if dns:
+        node["dns"] = [d.strip() for d in dns.split(",") if d.strip()]
+
+    merged = dict(peer_params)
+    merged.update(interface_params)
+
+    for int_param in ("jc", "jmin", "jmax", "s1", "s2", "s3", "s4"):
+        if int_param in merged:
+            try:
+                node[int_param] = int(merged[int_param])
+            except ValueError:
+                pass
+
+    for str_param in ("h1", "h2", "h3", "h4", "i1", "i2", "i3", "i4", "i5"):
+        if str_param in merged:
+            node[str_param] = str(merged[str_param])
+
+    return node
+
+
+def parse_awg_link(link: str) -> Optional[Dict[str, Any]]:
+    """
+    Parses an awg:// URI. Supports:
+    1. Direct URI: awg://private_key@host:port?public_key=...&jc=...#Name
+    2. Query-only URI: awg://host:port?private_key=...&public_key=...
+    3. Base64-encoded WireGuard/AWG .conf in awg://<base64>#Name
+    """
+    try:
+        raw = link.strip()
+        if not raw.lower().startswith("awg://"):
+            return None
+        body = raw[6:].strip()
+        fragment_name = ""
+        if "#" in body:
+            body, frag = body.split("#", 1)
+            fragment_name = urllib.parse.unquote(frag.strip())
+
+        try:
+            padded = body + "=" * (-len(body) % 4)
+            decoded_bytes = base64.urlsafe_b64decode(padded)
+            decoded_text = decoded_bytes.decode("utf-8", errors="ignore").strip()
+            if "[Interface]" in decoded_text and "[Peer]" in decoded_text:
+                return parse_wireguard_conf(decoded_text, name=fragment_name)
+            if decoded_text.startswith("{") and decoded_text.endswith("}"):
+                data = json.loads(decoded_text)
+                if isinstance(data, dict):
+                    if "config" in data and "[Interface]" in data["config"]:
+                        return parse_wireguard_conf(data["config"], name=fragment_name or data.get("name"))
+        except Exception:
+            pass
+
+        parsed = urllib.parse.urlparse(f"awg://{body}")
+        netloc = parsed.netloc
+        priv_key = ""
+        if "@" in netloc:
+            priv_key, endpoint = netloc.split("@", 1)
+        else:
+            endpoint = netloc
+
+        host, port = parse_endpoint(endpoint)
+        query = urllib.parse.parse_qs(parsed.query)
+        params = {k.lower(): v[0] for k, v in query.items()}
+
+        if not priv_key:
+            priv_key = params.get("private_key") or params.get("privatekey") or params.get("pk", "")
+        pub_key = params.get("public_key") or params.get("publickey") or params.get("peer_pk") or params.get("pbk", "")
+
+        if not priv_key or not pub_key:
+            return None
+
+        name = fragment_name or params.get("name") or f"AWG {host}:{port}"
+        addr_val = params.get("address") or params.get("ip") or params.get("local_address") or "10.0.0.2/32"
+        local_addrs = [a.strip() for a in addr_val.split(",") if a.strip()]
+
+        allowed_val = params.get("allowed_ips") or params.get("allowedips") or "0.0.0.0/0, ::/0"
+        allowed_ips = [a.strip() for a in allowed_val.split(",") if a.strip()]
+
+        node: Dict[str, Any] = {
+            "type": "awg",
+            "name": name,
+            "server": host,
+            "port": port,
+            "private_key": priv_key,
+            "public_key": pub_key,
+            "local_address": local_addrs,
+            "allowed_ips": allowed_ips,
+        }
+
+        psk = params.get("preshared_key") or params.get("presharedkey") or params.get("psk")
+        if psk:
+            node["preshared_key"] = psk
+
+        mtu = params.get("mtu")
+        if mtu:
+            try:
+                node["mtu"] = int(mtu)
+            except ValueError:
+                pass
+
+        for int_field in ("jc", "jmin", "jmax", "s1", "s2", "s3", "s4"):
+            if int_field in params:
+                try:
+                    node[int_field] = int(params[int_field])
+                except ValueError:
+                    pass
+
+        for str_field in ("h1", "h2", "h3", "h4", "i1", "i2", "i3", "i4", "i5"):
+            if str_field in params:
+                node[str_field] = str(params[str_field])
+
+        return node
+    except Exception:
+        return None
+
+
+def decompress_amnezia_vpn_payload(raw_bytes: bytes) -> Optional[str]:
+    """
+    Decompresses Amnezia VPN base64url payload with zlib.
+    Supports skipping 4-byte Qt header, scanning for 0x78 zlib magic byte,
+    direct zlib decompression, and raw deflate fallback.
+    """
+    if not raw_bytes:
+        return None
+
+    try:
+        candidate_text = raw_bytes.decode("utf-8").strip()
+        if (candidate_text.startswith("{") and candidate_text.endswith("}")) or \
+           (candidate_text.startswith("[") and candidate_text.endswith("]")):
+            return candidate_text
+    except Exception:
+        pass
+
+    decompressed: Optional[bytes] = None
+
+    if len(raw_bytes) >= 4:
+        try:
+            decompressed = zlib.decompress(raw_bytes[4:])
+        except Exception:
+            pass
+
+    if decompressed is None:
+        try:
+            decompressed = zlib.decompress(raw_bytes)
+        except Exception:
+            pass
+
+    if decompressed is None:
+        idx = 0
+        while True:
+            idx = raw_bytes.find(b"\x78", idx)
+            if idx == -1:
+                break
+            try:
+                decompressed = zlib.decompress(raw_bytes[idx:])
+                break
+            except Exception:
+                idx += 1
+
+    if decompressed is None:
+        for offset in (4, 0):
+            if len(raw_bytes) > offset:
+                try:
+                    decompressed = zlib.decompress(raw_bytes[offset:], -zlib.MAX_WBITS)
+                    break
+                except Exception:
+                    pass
+
+    if decompressed is not None:
+        try:
+            return decompressed.decode("utf-8")
+        except Exception:
+            return decompressed.decode("latin-1", errors="replace")
+
+    return None
+
+
+def _parse_awg_dict(d: Dict[str, Any], host_fallback: str, name: str) -> Optional[Dict[str, Any]]:
+    low = {str(k).lower(): v for k, v in d.items()}
+    priv_key = low.get("private_key") or low.get("privatekey") or low.get("client_priv_key")
+    pub_key = low.get("public_key") or low.get("publickey") or low.get("server_pub_key")
+    endpoint = low.get("endpoint") or low.get("server") or host_fallback
+    port = int(low.get("port", 51820))
+
+    if endpoint and ":" in str(endpoint):
+        endpoint, port = parse_endpoint(str(endpoint))
+
+    if not priv_key or not pub_key or not endpoint:
+        return None
+
+    local_addrs = low.get("local_address") or low.get("address") or low.get("ip") or ["10.0.0.2/32"]
+    if isinstance(local_addrs, str):
+        local_addrs = [a.strip() for a in local_addrs.split(",") if a.strip()]
+
+    allowed = low.get("allowed_ips") or low.get("allowedips") or ["0.0.0.0/0", "::/0"]
+    if isinstance(allowed, str):
+        allowed = [a.strip() for a in allowed.split(",") if a.strip()]
+
+    node = {
+        "type": "awg",
+        "name": name or f"AWG {endpoint}:{port}",
+        "server": endpoint,
+        "port": port,
+        "private_key": str(priv_key),
+        "public_key": str(pub_key),
+        "local_address": local_addrs,
+        "allowed_ips": allowed,
+    }
+    psk = low.get("preshared_key") or low.get("presharedkey") or low.get("psk")
+    if psk:
+        node["preshared_key"] = str(psk)
+
+    mtu = low.get("mtu")
+    if mtu:
+        try:
+            node["mtu"] = int(mtu)
+        except (ValueError, TypeError):
+            pass
+
+    for int_key in ("jc", "jmin", "jmax", "s1", "s2", "s3", "s4"):
+        if int_key in low:
+            try:
+                node[int_key] = int(low[int_key])
+            except (ValueError, TypeError):
+                pass
+
+    for str_key in ("h1", "h2", "h3", "h4", "i1", "i2", "i3", "i4", "i5"):
+        if str_key in low:
+            node[str_key] = str(low[str_key])
+
+    return node
+
+
+def _parse_amnezia_xray_dict(d: Dict[str, Any], host_fallback: str, name: str) -> Optional[Dict[str, Any]]:
+    low = {str(k).lower(): v for k, v in d.items()}
+    server = low.get("address") or low.get("server") or host_fallback
+    port = int(low.get("port", 443))
+    uuid = low.get("user_id") or low.get("id") or low.get("uuid")
+
+    if not server or not uuid:
+        return None
+
+    return {
+        "type": "vless",
+        "name": name or f"Xray {server}:{port}",
+        "server": str(server),
+        "port": port,
+        "uuid": str(uuid),
+        "flow": str(low.get("flow", "xtls-rprx-vision")),
+        "security": str(low.get("security", "reality")),
+        "sni": str(low.get("sni") or low.get("servername") or ""),
+        "fp": str(low.get("fingerprint") or low.get("client_fingerprint") or "chrome"),
+        "pbk": str(low.get("pbk") or low.get("public_key") or low.get("publickey") or ""),
+        "sid": str(low.get("short_id") or low.get("shortid") or low.get("sid") or ""),
+        "spx": str(low.get("spider_x") or low.get("spx") or ""),
+        "transport": str(low.get("transport") or low.get("network") or "tcp"),
+    }
+
+
+def parse_amnezia_vpn_payload(payload_bytes: bytes, default_name: Optional[str] = None) -> List[Dict[str, Any]]:
+    """
+    Parses decompressed or raw Amnezia VPN JSON payload.
+    Extracts AWG, WireGuard, and Xray containers with parameters
+    (Jc, Jmin, Jmax, S1-S4, H1-H4, I1-I5 for AWG; Reality/VLESS for Xray).
+    """
+    text = decompress_amnezia_vpn_payload(payload_bytes)
+    if not text:
+        return []
+
+    try:
+        data = json.loads(text)
+    except Exception:
+        return []
+
+    nodes: List[Dict[str, Any]] = []
+
+    servers = []
+    if isinstance(data, list):
+        servers = data
+    elif isinstance(data, dict):
+        if "servers" in data and isinstance(data["servers"], list):
+            servers = data["servers"]
+        else:
+            servers = [data]
+
+    for server_data in servers:
+        if not isinstance(server_data, dict):
+            continue
+
+        server_desc = default_name or server_data.get("description") or server_data.get("name") or ""
+        host_name = server_data.get("hostName") or server_data.get("ip") or ""
+        default_container = server_data.get("defaultContainer")
+
+        containers = server_data.get("containers", [])
+        if isinstance(containers, dict):
+            containers = [{"container": k, k: v} for k, v in containers.items()]
+        elif not containers and any(k in server_data for k in ("awg", "wireguard", "xray", "last_config")):
+            containers = [server_data]
+
+        for c_entry in containers:
+            if not isinstance(c_entry, dict):
+                continue
+
+            c_type = str(c_entry.get("container", "")).lower()
+            if not c_type:
+                for possible_key in ("amnezia-awg", "awg", "amnezia-wireguard", "wireguard", "amnezia-xray", "xray"):
+                    if possible_key in c_entry:
+                        c_type = possible_key
+                        break
+
+            # 1. AWG / WireGuard container
+            if any(t in c_type for t in ("awg", "wireguard")):
+                awg_data = c_entry.get("awg") or c_entry.get("amnezia-awg") or \
+                           c_entry.get("wireguard") or c_entry.get("amnezia-wireguard") or c_entry
+                last_cfg = awg_data.get("last_config") if isinstance(awg_data, dict) else None
+                if not last_cfg and "last_config" in c_entry:
+                    last_cfg = c_entry["last_config"]
+
+                node = None
+                container_name = f"{server_desc} - AWG" if server_desc else "Amnezia AWG"
+
+                if isinstance(last_cfg, str):
+                    last_cfg_str = last_cfg.strip()
+                    if last_cfg_str.startswith("{"):
+                        try:
+                            inner_json = json.loads(last_cfg_str)
+                            if isinstance(inner_json, dict):
+                                if "config" in inner_json and "[Interface]" in inner_json["config"]:
+                                    node = parse_wireguard_conf(inner_json["config"], name=container_name)
+                                else:
+                                    node = _parse_awg_dict(inner_json, host_name, container_name)
+                        except Exception:
+                            pass
+                    if not node and "[Interface]" in last_cfg_str and "[Peer]" in last_cfg_str:
+                        node = parse_wireguard_conf(last_cfg_str, name=container_name)
+                elif isinstance(last_cfg, dict):
+                    if "config" in last_cfg and "[Interface]" in last_cfg["config"]:
+                        node = parse_wireguard_conf(last_cfg["config"], name=container_name)
+                    else:
+                        node = _parse_awg_dict(last_cfg, host_name, container_name)
+                elif isinstance(awg_data, dict) and "[Interface]" in str(awg_data.get("config", "")):
+                    node = parse_wireguard_conf(awg_data["config"], name=container_name)
+
+                if node:
+                    if host_name and (not node.get("server") or node.get("server") == "127.0.0.1"):
+                        node["server"] = host_name
+                    nodes.append(node)
+
+            # 2. Xray container
+            elif "xray" in c_type:
+                xray_data = c_entry.get("xray") or c_entry.get("amnezia-xray") or c_entry
+                last_cfg = xray_data.get("last_config") if isinstance(xray_data, dict) else None
+                if not last_cfg and "last_config" in c_entry:
+                    last_cfg = c_entry["last_config"]
+
+                xray_dict = None
+                if isinstance(last_cfg, str):
+                    try:
+                        xray_dict = json.loads(last_cfg)
+                    except Exception:
+                        pass
+                elif isinstance(last_cfg, dict):
+                    xray_dict = last_cfg
+
+                if isinstance(xray_dict, dict):
+                    container_name = f"{server_desc} - Xray" if server_desc else "Amnezia Xray"
+                    node = _parse_amnezia_xray_dict(xray_dict, host_name, container_name)
+                    if node:
+                        nodes.append(node)
+
+    if default_container:
+        dc_low = default_container.lower()
+        def_match = [
+            n for n in nodes
+            if dc_low in n.get("name", "").lower()
+            or dc_low in n.get("type", "").lower()
+            or (any(t in dc_low for t in ("awg", "wireguard")) and n.get("type") == "awg")
+            or ("xray" in dc_low and n.get("type") == "vless")
+        ]
+        others = [n for n in nodes if n not in def_match]
+        return def_match + others
+
+    return nodes
+
+
+def parse_vpn_link(link: str) -> Optional[Dict[str, Any]]:
+    """
+    Parses a vpn:// URI (Amnezia VPN export).
+    Returns primary node (awg, wireguard, or xray).
+    """
+    nodes = parse_amnezia_vpn_link_all(link)
+    return nodes[0] if nodes else None
+
+
+def parse_amnezia_vpn_link_all(link: str) -> List[Dict[str, Any]]:
+    """
+    Parses a vpn:// URI and returns all extracted container nodes.
+    """
+    try:
+        raw = link.strip()
+        if not raw.lower().startswith("vpn://"):
+            return []
+        body = raw[6:].strip()
+        frag_name = ""
+        if "#" in body:
+            body, frag = body.split("#", 1)
+            frag_name = urllib.parse.unquote(frag.strip())
+
+        padded = body + "=" * (-len(body) % 4)
+        try:
+            raw_bytes = base64.urlsafe_b64decode(padded)
+        except Exception:
+            raw_bytes = base64.b64decode(padded)
+
+        return parse_amnezia_vpn_payload(raw_bytes, default_name=frag_name)
+    except Exception:
+        return []
 
 
 def parse_clash_proxy(proxy: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -590,6 +1102,12 @@ def parse_node_link(link: str) -> Optional[Dict[str, Any]]:
         return parse_hysteria2_link(line)
     if line.startswith("tuic://"):
         return parse_tuic_link(line)
+    if line.startswith("awg://"):
+        return parse_awg_link(line)
+    if line.startswith("vpn://"):
+        return parse_vpn_link(line)
+    if "[Interface]" in line and "[Peer]" in line:
+        return parse_wireguard_conf(line)
     return None
 
 
@@ -808,6 +1326,12 @@ def decode_subscription_lines(content: bytes) -> List[str]:
     except Exception:
         text = content.decode("latin-1", errors="replace").strip()
 
+    if "[Interface]" in text and "[Peer]" in text:
+        return [text]
+
+    if text.startswith("vpn://"):
+        return [text]
+
     is_plain = any(text.startswith(sch) or f"\n{sch}" in text for sch in SUPPORTED_SCHEMES)
     if is_plain:
         return text.splitlines()
@@ -817,6 +1341,8 @@ def decode_subscription_lines(content: bytes) -> List[str]:
         clean_b64 = "".join(text.split())
         padded = clean_b64 + "=" * (-len(clean_b64) % 4)
         decoded = base64.b64decode(padded).decode("utf-8", errors="replace")
+        if "[Interface]" in decoded and "[Peer]" in decoded:
+            return [decoded]
         return decoded.splitlines()
     except Exception:
         return text.splitlines()
@@ -825,6 +1351,17 @@ def decode_subscription_lines(content: bytes) -> List[str]:
 def parse_subscription_nodes(url: str, log_func=None) -> Tuple[List[Dict[str, Any]], Optional[int], Dict[str, Any]]:
     """Fetches, parses and dedupes nodes for a subscription URL, returning (nodes, interval, metadata)."""
     clean_url = (url or "").strip()
+    if clean_url.startswith("vpn://"):
+        if log_func:
+            log_func(f"Detected Amnezia vpn:// URI: {clean_url[:30]}...")
+        vpn_nodes = parse_amnezia_vpn_link_all(clean_url)
+        if vpn_nodes:
+            for n in vpn_nodes:
+                n["subscription_url"] = url
+            primary_name = vpn_nodes[0].get("name") or "Amnezia VPN"
+            return vpn_nodes, None, {"name": primary_name}
+        return [], None, {}
+
     if clean_url.startswith(SUPPORTED_SCHEMES):
         if log_func:
             log_func(f"Detected single node direct URI: {clean_url[:30]}...")
@@ -874,16 +1411,32 @@ def parse_subscription_nodes(url: str, log_func=None) -> Tuple[List[Dict[str, An
                 node["subscription_url"] = url
                 raw_nodes.append(node)
         else:
-            # 3. Plain text or base64 links
-            lines = decode_subscription_lines(content)
-            for line in lines:
-                try:
-                    node = parse_node_link(line)
-                    if node:
-                        node["subscription_url"] = url
-                        raw_nodes.append(node)
-                except Exception:
-                    continue
+            # 2.5. Check if payload is an Amnezia VPN payload (raw or decompressed)
+            amnezia_nodes = parse_amnezia_vpn_payload(content)
+            if amnezia_nodes:
+                if log_func:
+                    log_func(f"Detected Amnezia VPN container payload with {len(amnezia_nodes)} configurations.")
+                for node in amnezia_nodes:
+                    node["subscription_url"] = url
+                    raw_nodes.append(node)
+            else:
+                # 3. Plain text or base64 links
+                lines = decode_subscription_lines(content)
+                for line in lines:
+                    try:
+                        line_clean = line.strip()
+                        if line_clean.startswith("vpn://"):
+                            vnodes = parse_amnezia_vpn_link_all(line_clean)
+                            for vn in vnodes:
+                                vn["subscription_url"] = url
+                                raw_nodes.append(vn)
+                            continue
+                        node = parse_node_link(line)
+                        if node:
+                            node["subscription_url"] = url
+                            raw_nodes.append(node)
+                    except Exception:
+                        continue
 
     # Deduplicate nodes by name
     seen_names = set()

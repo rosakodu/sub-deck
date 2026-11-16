@@ -4,7 +4,7 @@ Single source of truth for URLs, defaults and configuration.
 """
 
 # Plugin version
-PLUGIN_VERSION = "1.2.3"
+PLUGIN_VERSION = "1.2.4"
 
 # Preset identifiers
 PRESET_DEFAULT = "default"        # Full Tunnel
@@ -74,6 +74,10 @@ SUPPORTED_SCHEMES = (
     "hysteria2://",
     "hy2://",
     "tuic://",
+    "awg://",
+    "vpn://",
+    "wireguard://",
+    "wg://",
 )
 
 # User-Agents for subscription fetching
