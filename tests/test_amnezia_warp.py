@@ -172,6 +172,37 @@ class TestAmneziaWarpGenerator(unittest.TestCase):
         warp_nodes = [n for n in nodes if n.get("subscription_url") == "amnezia_warp"]
         self.assertEqual(len(warp_nodes), 3)
 
+    @patch("subprocess.check_output")
+    @patch("urllib.request.urlopen")
+    @patch("core.warp_generator.DirectIPHTTPSConnection")
+    def test_warp_registration_fallback_to_direct_ip(self, mock_conn_cls, mock_urlopen, mock_subp):
+        import urllib.error
+        mock_subp.return_value = (
+            b"PrivateKey: YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=\n"
+            b"PublicKey: YmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmI=\n"
+        )
+        # Primary endpoint fails with SSL error (reproducing user's issue)
+        mock_urlopen.side_effect = urllib.error.URLError("ssl.SSLError: [SSL: CERTIFICATE_VERIFY_FAILED] (_ssl.c:1063)")
+
+        mock_conn = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.read.return_value = json.dumps({
+            "id": "device_fallback_ip",
+            "token": "token_fallback_ip",
+            "config": {
+                "client_id": "AAAA",
+                "peers": [{"public_key": "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo="}],
+                "interface": {"addresses": {"v4": "172.16.0.2"}}
+            }
+        }).encode("utf-8")
+        mock_conn.getresponse.return_value = mock_resp
+        mock_conn_cls.return_value = mock_conn
+
+        res = generate_warp_identity(self.bin_dir, self.settings_dir, force=True)
+        self.assertTrue(res.get("success"), f"Expected success but got: {res.get('error')}")
+        self.assertEqual(len(res.get("nodes")), 3)
+
 
 if __name__ == "__main__":
     unittest.main()

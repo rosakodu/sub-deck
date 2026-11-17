@@ -11,12 +11,23 @@ import subprocess
 import datetime
 import secrets
 import base64
+import socket
+import ssl
+import http.client
 import urllib.request
 import urllib.error
 from typing import Dict, Any, List, Optional
 
 CLOUDFLARE_REG_API = "https://api.cloudflareclient.com/v0a4471/reg"
 DEFAULT_WARP_PEER_KEY = "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo="
+
+CLOUDFLARE_REG_IPS = [
+    "162.159.192.1",
+    "162.159.193.1",
+    "188.114.96.1",
+    "188.114.97.1",
+    "162.159.195.1",
+]
 
 # Resilient Cloudflare WARP endpoint IPs and ports pool
 WARP_ENDPOINT_IPS = [
@@ -142,6 +153,160 @@ def _build_amnezia_nodes(
     return [quic_node, awg2_node, sip_node]
 
 
+class DirectIPHTTPSConnection(http.client.HTTPSConnection):
+    """HTTPS connection to a specific IP address while preserving the SNI hostname."""
+    def __init__(self, ip: str, sni: str, **kwargs):
+        super().__init__(ip, 443, **kwargs)
+        self.sni = sni
+
+    def connect(self):
+        super(http.client.HTTPSConnection, self).connect()
+        self.sock = self._context.wrap_socket(self.sock, server_hostname=self.sni)
+
+
+def register_cloudflare_account(pub_key: str, log_func=None) -> Dict[str, Any]:
+    """
+    Registers a Cloudflare WARP account with multi-tier resilience:
+    1. Direct HTTPS via urllib with unverified SSL context (fixes SteamOS CA bundle issues).
+    2. Direct Anycast IP connection with custom SNI (bypasses DNS blocks and TSPU resets).
+    3. Active local SOCKS5 proxy fallback (127.0.0.1:10808).
+    """
+    def _log(msg: str):
+        if log_func:
+            log_func(f"[Warp Registration] {msg}")
+
+    now_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    serial_num = secrets.token_hex(8)
+
+    payload = {
+        "key": pub_key,
+        "tos": now_str,
+        "model": "PC",
+        "serial_number": serial_num,
+        "key_type": "curve25519",
+        "tunnel_type": "wireguard",
+        "locale": "en_US"
+    }
+    payload_bytes = json.dumps(payload).encode("utf-8")
+
+    try:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+    except Exception:
+        ctx = ssl._create_unverified_context()
+
+    last_error = None
+
+    # Tier 1: Direct HTTPS via urllib with unverified SSL context
+    req = urllib.request.Request(
+        CLOUDFLARE_REG_API,
+        data=payload_bytes,
+        headers={
+            "User-Agent": "WARP for Android",
+            "CF-Client-Version": "a-6.35-4471",
+            "Content-Type": "application/json; charset=UTF-8"
+        },
+        method="POST"
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=8.0, context=ctx) as resp:
+            data = json.loads(resp.read().decode())
+            if data and data.get("id"):
+                _log("Registration successful via primary Cloudflare endpoint")
+                return {"success": True, "data": data}
+    except Exception as e:
+        last_error = e
+        _log(f"Primary endpoint failed: {e}. Trying direct Cloudflare IPs...")
+
+    # Tier 2: Direct TLS connection to Cloudflare Anycast IPs with SNI
+    for ip in CLOUDFLARE_REG_IPS:
+        conn = None
+        try:
+            conn = DirectIPHTTPSConnection(ip, "api.cloudflareclient.com", context=ctx, timeout=6.0)
+            conn.request(
+                "POST",
+                "/v0a4471/reg",
+                body=payload_bytes,
+                headers={
+                    "Host": "api.cloudflareclient.com",
+                    "User-Agent": "WARP for Android",
+                    "CF-Client-Version": "a-6.35-4471",
+                    "Content-Type": "application/json; charset=UTF-8",
+                    "Connection": "close"
+                }
+            )
+            resp = conn.getresponse()
+            if resp.status in (200, 201):
+                body = resp.read().decode()
+                data = json.loads(body)
+                if data and data.get("id"):
+                    _log(f"Registration successful via Cloudflare IP {ip}")
+                    return {"success": True, "data": data}
+            else:
+                _log(f"Cloudflare IP {ip} returned HTTP {resp.status}")
+        except Exception as e:
+            last_error = e
+            _log(f"Cloudflare IP {ip} failed: {e}")
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+
+    # Tier 3: Local SOCKS5 proxy fallback (127.0.0.1:10808) if active
+    try:
+        test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        test_sock.settimeout(1.0)
+        proxy_available = (test_sock.connect_ex(("127.0.0.1", 10808)) == 0)
+        test_sock.close()
+
+        if proxy_available:
+            _log("Attempting registration via active local proxy (127.0.0.1:10808)...")
+            import socks
+            proxy_sock = socks.create_connection(
+                ("api.cloudflareclient.com", 443),
+                timeout=8.0,
+                proxy_type=socks.SOCKS5,
+                proxy_addr="127.0.0.1",
+                proxy_port=10808
+            )
+            tls_sock = ctx.wrap_socket(proxy_sock, server_hostname="api.cloudflareclient.com")
+            http_req = (
+                f"POST /v0a4471/reg HTTP/1.1\r\n"
+                f"Host: api.cloudflareclient.com\r\n"
+                f"User-Agent: WARP for Android\r\n"
+                f"CF-Client-Version: a-6.35-4471\r\n"
+                f"Content-Type: application/json; charset=UTF-8\r\n"
+                f"Content-Length: {len(payload_bytes)}\r\n"
+                f"Connection: close\r\n\r\n"
+            ).encode("utf-8") + payload_bytes
+            tls_sock.sendall(http_req)
+
+            resp_data = b""
+            while True:
+                chunk = tls_sock.recv(4096)
+                if not chunk:
+                    break
+                resp_data += chunk
+            tls_sock.close()
+
+            header, _, body = resp_data.partition(b"\r\n\r\n")
+            if b"200 OK" in header or b"201 Created" in header:
+                data = json.loads(body.decode())
+                if data and data.get("id"):
+                    _log("Registration successful via local proxy")
+                    return {"success": True, "data": data}
+    except Exception as e:
+        last_error = e
+        _log(f"Local proxy fallback failed: {e}")
+
+    err_msg = f"Ошибка подключения к Cloudflare ({last_error}). Проверьте интернет-соединение."
+    return {"success": False, "error": err_msg}
+
+
 def generate_warp_identity(
     bin_dir: str,
     settings_dir: str,
@@ -204,36 +369,11 @@ def generate_warp_identity(
         return {"success": False, "error": f"Keypair generation failed: {e}"}
 
     # 3. Register with Cloudflare WARP API
-    now_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
-    serial_num = secrets.token_hex(8)
+    reg_res = register_cloudflare_account(pub_key, log_func=_log)
+    if not reg_res.get("success"):
+        return reg_res
 
-    payload = {
-        "key": pub_key,
-        "tos": now_str,
-        "model": "PC",
-        "serial_number": serial_num,
-        "key_type": "curve25519",
-        "tunnel_type": "wireguard",
-        "locale": "en_US"
-    }
-
-    req = urllib.request.Request(
-        CLOUDFLARE_REG_API,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "User-Agent": "WARP for Android",
-            "CF-Client-Version": "a-6.35-4471",
-            "Content-Type": "application/json; charset=UTF-8"
-        },
-        method="POST"
-    )
-
-    try:
-        with urllib.request.urlopen(req, timeout=15.0) as resp:
-            data = json.loads(resp.read().decode())
-    except Exception as e:
-        _log(f"Cloudflare registration request failed: {e}")
-        return {"success": False, "error": f"Cloudflare API error: {e}"}
+    data = reg_res["data"]
 
     cfg = data.get("config", {})
     client_id_b64 = cfg.get("client_id", "")
