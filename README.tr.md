@@ -1,3 +1,11 @@
+<p align="center">
+  <a href="https://deckyloader.ru/">
+    <img src="assets/plugin_store.png" alt="Decky Loader Россия" width="128">
+  </a>
+  <br>
+  <strong>Bu eklenti <a href="https://deckyloader.ru/">Decky Loader Россия</a> desteğiyle geliştirilmiştir</strong>
+</p>
+
 # sub-deck
 
 [🇺🇸 English](README.md) | [🇷🇺 Русский](README.ru.md) | [🇺🇦 Українська](README.uk.md) | [🇨🇳 简体中文](README.zh-CN.md) | [🇹🇼 繁體中文](README.zh-TW.md) | [🇸🇦 العربية](README.ar.md) | [🇮🇷 فارسی](README.fa.md) | [🇹🇷 Türkçe](README.tr.md)

@@ -70,6 +70,7 @@ rsync -a --exclude '__pycache__' --exclude '*.pyc' dist/ "$STAGING_DIR/sub-deck/
 rsync -a --exclude '__pycache__' --exclude '*.pyc' core/ "$STAGING_DIR/sub-deck/core/"
 rsync -a --exclude '__pycache__' --exclude '*.pyc' tray/ "$STAGING_DIR/sub-deck/tray/"
 rsync -a defaults/ "$STAGING_DIR/sub-deck/defaults/"
+[ -d assets ] && rsync -a assets/ "$STAGING_DIR/sub-deck/assets/"
 
 # Нормализация прав
 find "$STAGING_DIR/sub-deck" -type d -exec chmod 755 {} +
