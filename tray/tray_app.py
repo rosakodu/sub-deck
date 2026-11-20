@@ -38,7 +38,7 @@ from core.constants import (
     PRESET_ROSCOMVPN,
     SUPPORTED_SCHEMES,
 )
-from core.system import read_system_clipboard, clean_node_name
+from core.system import read_system_clipboard, clean_node_name, get_node_category
 
 
 # ─────────────────────────────────────────────────────────────
@@ -56,6 +56,12 @@ STRINGS = {
         "menu_select_server": "Выбрать сервер",
         "menu_subscriptions": "Подписки",
         "menu_preset": "Пресет маршрутизации",
+        "menu_protocol_filter": "Фильтр протоколов",
+        "filter_all": "Все протоколы",
+        "filter_tls": "TLS / Веб (Reality / Trojan)",
+        "filter_obfs": "Обфускация / Random (AWG / Warp)",
+        "filter_udp": "Скоростной UDP (Hysteria 2 / TUIC)",
+        "no_servers_filter": "Нет серверов для выбранного протокола",
         "btn_paste_sub": "📋 Вставить из буфера обмена",
         "btn_add_manual": "✏️ Ввести URL вручную...",
         "btn_check_ping": "⚡ Проверить пинг",
@@ -93,6 +99,12 @@ STRINGS = {
         "menu_select_server": "Select Server",
         "menu_subscriptions": "Subscriptions",
         "menu_preset": "Routing Preset",
+        "menu_protocol_filter": "Protocol Filter",
+        "filter_all": "All Protocols",
+        "filter_tls": "TLS / Web (Reality / Trojan)",
+        "filter_obfs": "Obfuscation / Random (AWG / Warp)",
+        "filter_udp": "Fast UDP (Hysteria 2 / TUIC)",
+        "no_servers_filter": "No servers found for this protocol filter",
         "btn_paste_sub": "📋 Paste from Clipboard",
         "btn_add_manual": "✏️ Enter URL manually...",
         "btn_check_ping": "⚡ Check Ping",
@@ -400,6 +412,7 @@ class SubDeckTrayApp:
         self.settings: Dict[str, Any] = {}
         self.status: Optional[Dict[str, Any]] = None
         self.ping_map: Dict[str, int] = {}
+        self.protocol_filter: str = "all"
 
         # Display properties
         self.current_title = tr("app_title")
@@ -713,18 +726,22 @@ class SubDeckTrayApp:
             dbus.Array([], signature=dbus.Signature('v'))
         )))
 
-        if not nodes:
+        display_nodes = nodes
+        if self.protocol_filter != "all":
+            display_nodes = [n for n in nodes if get_node_category(n) == self.protocol_filter]
+
+        if not display_nodes:
             server_children.append(dbus.Struct((
                 dbus.Int32(12),
                 dbus.Dictionary({
-                    dbus.String('label'): dbus.String(tr("no_servers")),
+                    dbus.String('label'): dbus.String(tr("no_servers") if not nodes else tr("no_servers_filter")),
                     dbus.String('enabled'): dbus.Boolean(False),
                     dbus.String('visible'): dbus.Boolean(True),
                 }, signature=dbus.Signature('sv')),
                 dbus.Array([], signature=dbus.Signature('v'))
             )))
         else:
-            for node in nodes:
+            for node in display_nodes:
                 name = clean_node_name(node.get("name", "Server"))
 
                 raw_type = (node.get("type") or "").lower()
@@ -944,6 +961,40 @@ class SubDeckTrayApp:
             dbus.Array(preset_children, signature=dbus.Signature('v'))
         )))
 
+        # 5. Protocol Filter Submenu
+        proto_menu_id = 35
+        proto_children: List[dbus.Struct] = []
+        proto_items = [
+            ("all", "filter_all"),
+            ("tls", "filter_tls"),
+            ("obfs", "filter_obfs"),
+            ("udp", "filter_udp"),
+        ]
+        for p_key, p_label_key in proto_items:
+            is_active = self.protocol_filter == p_key
+            prefix = "✔ " if is_active else ""
+            act_id = self._register_action(lambda k=p_key: self._set_protocol_filter(k))
+            proto_children.append(dbus.Struct((
+                dbus.Int32(act_id),
+                dbus.Dictionary({
+                    dbus.String('label'): dbus.String(f"{prefix}{tr(p_label_key)}"),
+                    dbus.String('enabled'): dbus.Boolean(True),
+                    dbus.String('visible'): dbus.Boolean(True),
+                }, signature=dbus.Signature('sv')),
+                dbus.Array([], signature=dbus.Signature('v'))
+            )))
+
+        self.menu_children_map[proto_menu_id] = proto_children
+        new_root_items.append(dbus.Struct((
+            dbus.Int32(proto_menu_id),
+            dbus.Dictionary({
+                dbus.String('label'): dbus.String(tr("menu_protocol_filter")),
+                dbus.String('children-display'): dbus.String('submenu'),
+                dbus.String('visible'): dbus.Boolean(True),
+            }, signature=dbus.Signature('sv')),
+            dbus.Array(proto_children, signature=dbus.Signature('v'))
+        )))
+
         # Separator
         new_root_items.append(dbus.Struct((
             dbus.Int32(40),
@@ -1008,6 +1059,10 @@ class SubDeckTrayApp:
             time.sleep(0.4)
             self._trigger_background_poll()
         threading.Thread(target=_worker, daemon=True).start()
+
+    def _set_protocol_filter(self, category: str):
+        self.protocol_filter = category
+        self.rebuild_menu()
 
     def _set_preset(self, preset: str):
         def _worker():

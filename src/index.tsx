@@ -18,13 +18,14 @@ import {
 import { FC, useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { FaNetworkWired, FaClipboard } from "react-icons/fa";
 
-import { NodeConfig, TranslationKeys, SubscriptionMetadata, Settings } from "./types";
+import { NodeConfig, TranslationKeys, SubscriptionMetadata, Settings, ProtocolCategory } from "./types";
 import { SUPPORT_COMMUNITY_URL, PASTE_BUTTON_CSS } from "./constants";
 import { translations, getTranslation } from "./i18n";
 import {
   isFreeSubscriptionUrl,
   getDomainLabel,
   getNodeMethodLabel,
+  getNodeCategory,
   readClipboardText,
   formatBytes,
   formatExpiry,
@@ -55,6 +56,13 @@ const PRESET_OPTIONS: Array<{ key: string; labelKey: TranslationKeys }> = [
   { key: "bypass_ru", labelKey: "presetBypassRu" },
   { key: "gaming", labelKey: "presetGaming" },
   { key: "roscomvpn", labelKey: "presetRoscom" },
+];
+
+const PROTOCOL_OPTIONS: Array<{ key: ProtocolCategory; labelKey: TranslationKeys }> = [
+  { key: "all", labelKey: "protocolFilterAll" },
+  { key: "tls", labelKey: "protocolFilterTls" },
+  { key: "obfs", labelKey: "protocolFilterObfs" },
+  { key: "udp", labelKey: "protocolFilterUdp" },
 ];
 
 function unwrap<T>(payload: any): T {
@@ -173,6 +181,8 @@ function Content() {
   const [preset, setPreset] = useState<string>("default");
   const [expandedSubs, setExpandedSubs] = useState<Record<string, boolean>>({});
   const [presetExpanded, setPresetExpanded] = useState<boolean>(false);
+  const [protocolFilter, setProtocolFilter] = useState<ProtocolCategory>("all");
+  const [protocolExpanded, setProtocolExpanded] = useState<boolean>(false);
   const [trayAutostart, setTrayAutostart] = useState<boolean>(true);
   const [subMetadata, setSubMetadata] = useState<Record<string, SubscriptionMetadata>>({});
   const [isPinging, setIsPinging] = useState(false);
@@ -675,6 +685,73 @@ function Content() {
         )}
       </PanelSection>
 
+      {/* Выбор фильтра протоколов */}
+      <PanelSection>
+        <PanelSectionRow>
+          <ButtonItem
+            layout="below"
+            onClick={() => setProtocolExpanded(!protocolExpanded)}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
+              <span style={{ fontSize: "11px", fontWeight: "bold", color: "#a5a5a5", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                {t("protocolFilterLabel")}: <span style={{ color: "#1a9fff", fontWeight: "normal", textTransform: "none" }}>
+                  {t((PROTOCOL_OPTIONS.find((p) => p.key === protocolFilter)?.labelKey || "protocolFilterAll") as TranslationKeys)}
+                </span>
+              </span>
+              <span style={{ fontSize: "10px", color: "#888" }}>
+                {protocolExpanded ? "▼" : "▶"}
+              </span>
+            </div>
+          </ButtonItem>
+        </PanelSectionRow>
+
+        {protocolExpanded && (
+          <>
+            {PROTOCOL_OPTIONS.map((item) => {
+              const isSelected = protocolFilter === item.key;
+              const label = t(item.labelKey);
+              return (
+                <PanelSectionRow key={item.key}>
+                  <div style={{ position: "relative", width: "100%" }}>
+                    <ButtonItem
+                      layout="below"
+                      onClick={() => {
+                        setProtocolFilter(item.key);
+                        setProtocolExpanded(false);
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontWeight: isSelected ? "bold" : "normal",
+                          color: isSelected ? "#1a9fff" : "inherit",
+                        }}
+                      >
+                        {label}
+                      </div>
+                    </ButtonItem>
+                    {isSelected && (
+                      <div
+                        style={{
+                          position: "absolute",
+                          top: 0,
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          border: "1.5px solid #1a9fff",
+                          borderRadius: "4px",
+                          pointerEvents: "none",
+                          backgroundColor: "rgba(26, 159, 255, 0.1)",
+                        }}
+                      />
+                    )}
+                  </div>
+                </PanelSectionRow>
+              );
+            })}
+          </>
+        )}
+      </PanelSection>
+
       {/* Кнопка добавления подписки через модальное окно */}
       <PanelSectionRow>
         <ButtonItem
@@ -721,6 +798,10 @@ function Content() {
         ) : (
           subscriptions.map((url, idx) => {
             const subNodes = nodesBySubscription[url] || [];
+            const filteredSubNodes =
+              protocolFilter === "all"
+                ? subNodes
+                : subNodes.filter((node) => getNodeCategory(node) === protocolFilter);
             const isFreeConfigs = isFreeSubscriptionUrl(url);
             const meta = subMetadata[url] || {};
             const domainLabel = meta.name ? meta.name : getDomainLabel(url, lang);
@@ -758,6 +839,9 @@ function Content() {
                           title={domainLabel}
                         >
                           {domainLabel}
+                          <span style={{ fontSize: "11px", fontWeight: "normal", color: "#888", marginLeft: "6px" }}>
+                            {protocolFilter === "all" ? `(${subNodes.length})` : `(${filteredSubNodes.length}/${subNodes.length})`}
+                          </span>
                         </span>
                         <span style={{ fontSize: "10px", color: "#888", marginLeft: "6px", flexShrink: 0 }}>
                           {isExpanded ? "▼" : "▶"}
@@ -785,9 +869,9 @@ function Content() {
                 {isExpanded && (
                   <>
                     {/* Список нод этой подписки */}
-                    {subNodes.length > 0 ? (
+                    {filteredSubNodes.length > 0 ? (
                       <div style={{ maxHeight: "250px", overflowY: "auto", paddingRight: "4px", marginBottom: "8px" }}>
-                        {subNodes.map((node, nIdx) => {
+                        {filteredSubNodes.map((node, nIdx) => {
                           const isSelected = selectedNode?.name === node.name;
                           const isActive = isSelected && connected;
                           return (
@@ -829,7 +913,7 @@ function Content() {
                     ) : (
                       <PanelSectionRow>
                         <div style={{ color: "#888", fontSize: "12px", padding: "4px 0" }}>
-                          {t("noNodesFound")}
+                          {subNodes.length === 0 ? t("noNodesFound") : t("noNodesForFilter")}
                         </div>
                       </PanelSectionRow>
                     )}

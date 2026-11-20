@@ -50,7 +50,13 @@ export const translations: Record<string, Record<TranslationKeys, string>> = {
     desktopTrayToggle: "System Tray Companion",
     desktopTrayToggleDesc: "Auto-start tray icon to manage VPN in Desktop Mode without opening Steam",
     confirmAddBtn: "Add",
-    cancelBtn: "Cancel"
+    cancelBtn: "Cancel",
+    protocolFilterLabel: "Protocol Filter",
+    protocolFilterAll: "All Protocols",
+    protocolFilterTls: "TLS / Web (Reality / Trojan)",
+    protocolFilterObfs: "Obfuscation / Random (AWG / Warp)",
+    protocolFilterUdp: "Fast UDP (Hysteria 2 / TUIC)",
+    noNodesForFilter: "No servers found for this protocol filter"
   },
   russian: {
     title: "Управление VLESS",
@@ -101,7 +107,13 @@ export const translations: Record<string, Record<TranslationKeys, string>> = {
     desktopTrayToggle: "Иконка в системном трее",
     desktopTrayToggleDesc: "Автозапуск трея для управления VPN на рабочем столе без открытия Steam",
     confirmAddBtn: "Добавить",
-    cancelBtn: "Отмена"
+    cancelBtn: "Отмена",
+    protocolFilterLabel: "Фильтр протоколов",
+    protocolFilterAll: "Все протоколы",
+    protocolFilterTls: "TLS / Веб (Reality / Trojan)",
+    protocolFilterObfs: "Обфускация / Random (AWG / Warp)",
+    protocolFilterUdp: "Скоростной UDP (Hysteria 2 / TUIC)",
+    noNodesForFilter: "Нет серверов для выбранного протокола"
   },
   schinese: {
     title: "VLESS 管理",
@@ -152,7 +164,13 @@ export const translations: Record<string, Record<TranslationKeys, string>> = {
     desktopTrayToggle: "系统托盘图标",
     desktopTrayToggleDesc: "在桌面模式下自动启动托盘图标以管理 VPN，无需打开 Steam",
     confirmAddBtn: "添加",
-    cancelBtn: "取消"
+    cancelBtn: "取消",
+    protocolFilterLabel: "协议筛选",
+    protocolFilterAll: "全部协议",
+    protocolFilterTls: "TLS / 网页 (Reality / Trojan)",
+    protocolFilterObfs: "混淆 / 随机流量 (AWG / Warp)",
+    protocolFilterUdp: "高速 UDP (Hysteria 2 / TUIC)",
+    noNodesForFilter: "未找到符合所选协议的服务器"
   },
   tchinese: {
     title: "VLESS 管理",
@@ -203,7 +221,13 @@ export const translations: Record<string, Record<TranslationKeys, string>> = {
     desktopTrayToggle: "系統匣圖示",
     desktopTrayToggleDesc: "在桌面模式下自動啟動系統匣圖示以管理 VPN，無需開啟 Steam",
     confirmAddBtn: "新增",
-    cancelBtn: "取消"
+    cancelBtn: "取消",
+    protocolFilterLabel: "協議篩選",
+    protocolFilterAll: "全部協議",
+    protocolFilterTls: "TLS / 網頁 (Reality / Trojan)",
+    protocolFilterObfs: "混淆 / 隨機流量 (AWG / Warp)",
+    protocolFilterUdp: "高速 UDP (Hysteria 2 / TUIC)",
+    noNodesForFilter: "未找到符合所選協議的伺服器"
   },
   arabic: {
     title: "إدارة VLESS",
@@ -254,7 +278,13 @@ export const translations: Record<string, Record<TranslationKeys, string>> = {
     desktopTrayToggle: "System Tray Companion",
     desktopTrayToggleDesc: "Auto-start tray icon to manage VPN in Desktop Mode without opening Steam",
     confirmAddBtn: "إضافة",
-    cancelBtn: "إلغاء"
+    cancelBtn: "إلغاء",
+    protocolFilterLabel: "تصفية البروتوكول",
+    protocolFilterAll: "جميع البروتوكولات",
+    protocolFilterTls: "TLS / ويب (Reality / Trojan)",
+    protocolFilterObfs: "تشويش / حركة عشوائية (AWG / Warp)",
+    protocolFilterUdp: "UDP سريع (Hysteria 2 / TUIC)",
+    noNodesForFilter: "لم يتم العثور على خوادم لهذا البروتوكول"
   },
   persian: {
     title: "مدیریت VLESS",
@@ -305,7 +335,13 @@ export const translations: Record<string, Record<TranslationKeys, string>> = {
     desktopTrayToggle: "System Tray Companion",
     desktopTrayToggleDesc: "Auto-start tray icon to manage VPN in Desktop Mode without opening Steam",
     confirmAddBtn: "افزودن",
-    cancelBtn: "لغو"
+    cancelBtn: "لغو",
+    protocolFilterLabel: "فیلتر پروتکل",
+    protocolFilterAll: "همه پروتکل‌ها",
+    protocolFilterTls: "TLS / وب (Reality / Trojan)",
+    protocolFilterObfs: "مبهم‌سازی / تصادفی (AWG / Warp)",
+    protocolFilterUdp: "UDP سریع (Hysteria 2 / TUIC)",
+    noNodesForFilter: "هیچ سروری برای این فیلتر پروتکل پیدا نشد"
   },
   turkish: {
     title: "VPN Yapılandırmaları",
@@ -356,7 +392,13 @@ export const translations: Record<string, Record<TranslationKeys, string>> = {
     desktopTrayToggle: "System Tray Companion",
     desktopTrayToggleDesc: "Auto-start tray icon to manage VPN in Desktop Mode without opening Steam",
     confirmAddBtn: "Ekle",
-    cancelBtn: "İptal"
+    cancelBtn: "İptal",
+    protocolFilterLabel: "Protokol Filtresi",
+    protocolFilterAll: "Tüm Protokoller",
+    protocolFilterTls: "TLS / Web (Reality / Trojan)",
+    protocolFilterObfs: "Gizleme / Rastgele (AWG / Warp)",
+    protocolFilterUdp: "Hızlı UDP (Hysteria 2 / TUIC)",
+    noNodesForFilter: "Bu protokol filtresi için sunucu bulunamadı"
   }
 };
 

@@ -1,4 +1,4 @@
-import { NodeConfig } from "./types";
+import { NodeConfig, ProtocolCategory } from "./types";
 import { FREE_SUB_IDENTIFIERS } from "./constants";
 
 export function isFreeSubscriptionUrl(url: string): boolean {
@@ -68,6 +68,40 @@ export function getNodeMethodLabel(node: NodeConfig): string {
 
   const security = (node.security || "none").toUpperCase();
   return `${protocol}/${transport}/${security}`;
+}
+
+export function getNodeCategory(node: NodeConfig): ProtocolCategory {
+  const type = (node.type || "").toLowerCase();
+  const sec = (node.security || "").toLowerCase();
+  const sub = (node.subscription_url || "").toLowerCase();
+
+  if (type === "hysteria2" || type === "hy2" || type === "tuic") {
+    return "udp";
+  }
+
+  if (
+    type === "awg" ||
+    type === "wireguard" ||
+    type === "warp" ||
+    type === "shadowsocks" ||
+    type === "ss" ||
+    sub.includes("warp") ||
+    sub.includes("amnezia")
+  ) {
+    return "obfs";
+  }
+
+  if (
+    type === "vless" ||
+    type === "trojan" ||
+    type === "vmess" ||
+    sec === "reality" ||
+    sec === "tls"
+  ) {
+    return "tls";
+  }
+
+  return "all";
 }
 
 export async function readClipboardText(getBackendClipboard: () => Promise<any>): Promise<string> {

@@ -83,5 +83,13 @@ export type TranslationKeys =
   | "desktopTrayToggle"
   | "desktopTrayToggleDesc"
   | "confirmAddBtn"
-  | "cancelBtn";
+  | "cancelBtn"
+  | "protocolFilterLabel"
+  | "protocolFilterAll"
+  | "protocolFilterTls"
+  | "protocolFilterObfs"
+  | "protocolFilterUdp"
+  | "noNodesForFilter";
+
+export type ProtocolCategory = "all" | "tls" | "obfs" | "udp";
 

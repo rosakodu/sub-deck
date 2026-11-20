@@ -1348,7 +1348,14 @@ def decode_subscription_lines(content: bytes) -> List[str]:
         return text.splitlines()
 
 
-def parse_subscription_nodes(url: str, log_func=None) -> Tuple[List[Dict[str, Any]], Optional[int], Dict[str, Any]]:
+_DEFAULT_TARGET_COUNT = object()
+
+
+def parse_subscription_nodes(
+    url: str,
+    log_func=None,
+    target_count: Any = _DEFAULT_TARGET_COUNT
+) -> Tuple[List[Dict[str, Any]], Optional[int], Dict[str, Any]]:
     """Fetches, parses and dedupes nodes for a subscription URL, returning (nodes, interval, metadata)."""
     clean_url = (url or "").strip()
     if clean_url.startswith("vpn://"):
@@ -1450,8 +1457,15 @@ def parse_subscription_nodes(url: str, log_func=None) -> Tuple[List[Dict[str, An
     if log_func:
         log_func(f"Parsed {len(unique_nodes)} unique nodes for {url}")
 
-    # Select responsive nodes
-    limit = FREE_SUBSCRIPTION_NODE_LIMIT if is_free_subscription(url) else REGULAR_SUBSCRIPTION_NODE_LIMIT
+    # Select responsive nodes (no limit if target_count is None or <= 0)
+    if target_count is _DEFAULT_TARGET_COUNT:
+        limit = FREE_SUBSCRIPTION_NODE_LIMIT if is_free_subscription(url) else REGULAR_SUBSCRIPTION_NODE_LIMIT
+    else:
+        limit = target_count
+
+    if limit is not None and limit <= 0:
+        limit = None
+
     selected_nodes = select_best_nodes(unique_nodes, target_count=limit, log_func=log_func)
 
     return selected_nodes, interval, metadata

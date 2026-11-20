@@ -112,20 +112,26 @@ def check_nodes_ping(nodes: List[Dict[str, Any]], max_workers: int = 25, timeout
 
 def select_best_nodes(
     nodes: List[Dict[str, Any]],
-    target_count: int = 15,
+    target_count: Optional[int] = None,
     sample_size: int = PING_SAMPLE_MAX,
     log_func=None
 ) -> List[Dict[str, Any]]:
     """
     Selects top responsive nodes by sampling and TCP pinging.
     Preserves fallback order if ping fails.
+    If target_count is None or <= 0, no limit is applied and all nodes are returned.
     """
     if not nodes:
         return []
 
+    has_limit = target_count is not None and target_count > 0
+
     sampled = random.sample(nodes, min(len(nodes), sample_size))
     if log_func:
-        log_func(f"Pinging {len(sampled)} sampled nodes for top {target_count} selection...")
+        if has_limit:
+            log_func(f"Pinging {len(sampled)} sampled nodes for top {target_count} selection...")
+        else:
+            log_func(f"Pinging {len(sampled)} sampled nodes without limit...")
 
     try:
         alive = check_nodes_ping(sampled)
@@ -133,24 +139,37 @@ def select_best_nodes(
             log_func(f"Ping finished: {len(alive)} nodes responsive out of {len(sampled)}.")
 
         if alive:
-            selected = alive[:target_count]
-            # If we got fewer alive than requested, backfill with remaining nodes
-            if len(selected) < target_count:
-                seen_endpoints = {(n["server"], n["port"]) for n in selected}
-                for n in nodes:
-                    endpoint = (n.get("server"), n.get("port"))
-                    if endpoint not in seen_endpoints:
-                        selected.append(n)
-                        seen_endpoints.add(endpoint)
-                        if len(selected) >= target_count:
-                            break
-            return selected
+            # Map alive nodes back to their indices in nodes
+            used_indices = set()
+            alive_matched = []
+            for a in alive:
+                for idx, orig in enumerate(nodes):
+                    if idx in used_indices:
+                        continue
+                    if (a.get("name") and a.get("name") == orig.get("name")) or (
+                        a.get("server") == orig.get("server") and a.get("port") == orig.get("port")
+                    ):
+                        used_indices.add(idx)
+                        alive_matched.append(a)
+                        break
+
+            remaining = [orig for idx, orig in enumerate(nodes) if idx not in used_indices]
+
+            if has_limit:
+                selected = alive_matched[:target_count]
+                if len(selected) < target_count:
+                    selected.extend(remaining[:target_count - len(selected)])
+                return selected
+            else:
+                return alive_matched + remaining
     except Exception as e:
         if log_func:
             log_func(f"Ping selection encountered error: {e}")
 
-    # Fallback to head of original list
-    return nodes[:target_count]
+    # Fallback to original list
+    if has_limit:
+        return nodes[:target_count]
+    return list(nodes)
 
 
 def ping_all_nodes(nodes: List[Dict[str, Any]], max_workers: int = 25, timeout: float = 1.8) -> List[Dict[str, Any]]:

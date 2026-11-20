@@ -295,3 +295,18 @@ def clean_node_name(name: str) -> str:
     clean = _BALANCER_BRACKET_RE.sub("", name)
     clean = _BALANCER_WORD_RE.sub("", clean).strip()
     return clean or name
+
+
+def get_node_category(node: dict) -> str:
+    """Categorizes node into 'udp', 'obfs', 'tls', or 'all'."""
+    raw_type = (node.get("type") or "").lower()
+    security = (node.get("security") or "").lower()
+    sub_url = (node.get("subscription_url") or "").lower()
+
+    if raw_type in ("hysteria2", "hy2", "tuic"):
+        return "udp"
+    if raw_type in ("awg", "wireguard", "warp", "shadowsocks", "ss") or "warp" in sub_url or "amnezia" in sub_url:
+        return "obfs"
+    if raw_type in ("vless", "trojan", "vmess") or security in ("reality", "tls"):
+        return "tls"
+    return "all"
