@@ -20,7 +20,7 @@ except ImportError:
 # Ensure plugin directory is in sys.path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from core.constants import FREE_SUBSCRIPTIONS, PRESET_ROSCOMVPN
+from core.constants import FREE_SUBSCRIPTIONS
 from core.system import get_user_home, read_system_clipboard, get_default_gateway, get_target_uid_gid
 from core.server import SubDeckApiServer
 from tray.desktop_integration import (
@@ -179,16 +179,7 @@ class Plugin:
         return nodes
 
     async def save_preset(self, preset: str) -> bool:
-        settings = self.vpn.load_settings()
-        settings["selected_preset"] = preset
-        self.vpn.save_settings(settings)
-        if preset in (PRESET_ROSCOMVPN, "bypass_ru"):
-            await self.loop.run_in_executor(None, self.vpn.update_geofiles, False)
-        # If VPN is actively running, hot-restart with new preset routing rules
-        if self.vpn.is_running():
-            node = settings.get("selected_node")
-            if node:
-                await self.loop.run_in_executor(None, self.vpn.start, node)
+        await self.loop.run_in_executor(None, self.vpn.save_preset, preset)
         return True
 
     async def update_routing_presets(self) -> dict:
@@ -374,37 +365,35 @@ class Plugin:
             await asyncio.sleep(900)
 
     async def _sleep_monitor_loop(self) -> None:
-        """Monitors system sleep/resume events and seamlessly restores VPN connectivity."""
-        last_tick = time.monotonic()
+        """Detects Linux suspend time and reconnects when the physical network returns."""
+        last_suspend_time = time.clock_gettime(time.CLOCK_BOOTTIME) - time.monotonic()
         while True:
             try:
                 await asyncio.sleep(3)
-                now = time.monotonic()
-                delta = now - last_tick
-                last_tick = now
+                suspend_time = time.clock_gettime(time.CLOCK_BOOTTIME) - time.monotonic()
+                suspended_for = suspend_time - last_suspend_time
+                last_suspend_time = suspend_time
+                if suspended_for < 0.5 or not self.vpn:
+                    continue
 
-                # If loop interval exceeded 8 seconds, system was suspended/slept
-                if delta > 8.0:
-                    decky.logger.info(f"Steam Deck resume detected (suspend delta ~{delta:.1f}s)")
-                    if self.vpn and self.vpn.is_running():
-                        decky.logger.info("VPN was active before sleep. Waiting for Wi-Fi / network gateway...")
-                        settings = self.vpn.load_settings()
-                        node = settings.get("selected_node")
+                decky.logger.info(f"Steam Deck resumed after {suspended_for:.1f}s asleep")
+                vpn = self.vpn
+                generation = await self.loop.run_in_executor(None, vpn.resume_generation)
+                if generation is None:
+                    continue
 
-                        # Wait up to 10 seconds (20 iterations of 0.5s) for network gateway
-                        gw, iface = None, None
-                        for _ in range(20):
-                            await asyncio.sleep(0.5)
-                            gw, iface = get_default_gateway()
-                            if gw and iface:
-                                break
+                network_ready = False
+                deadline = self.loop.time() + 10.0
+                while self.loop.time() < deadline:
+                    gw, iface = await self.loop.run_in_executor(None, get_default_gateway)
+                    if gw and iface:
+                        network_ready = True
+                        break
+                    await asyncio.sleep(0.5)
 
-                        if node and gw and iface:
-                            decky.logger.info(f"Network restored ({iface} via {gw}). Re-establishing tunnel...")
-                            await self.loop.run_in_executor(None, self.vpn.start, node)
-                        else:
-                            decky.logger.warning("No network detected after resume. Tearing down stale tunnel to prevent routing lock.")
-                            await self.loop.run_in_executor(None, self.vpn.stop)
+                if not network_ready:
+                    decky.logger.warning("No network after resume. Clearing the stale VPN tunnel.")
+                await self.loop.run_in_executor(None, vpn.recover_after_resume, generation, network_ready)
             except asyncio.CancelledError:
                 break
             except Exception as e:

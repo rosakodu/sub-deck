@@ -17,6 +17,7 @@ from core.constants import (
     DEFAULT_SOCKS_HOST,
     DEFAULT_SOCKS_PORT,
     TUN_INTERFACE,
+    TUN_ROUTE_PROTOCOL,
     TUN_IP_CIDR,
     TUN_MTU,
     DNS_SERVERS,
@@ -33,6 +34,7 @@ from core.system import (
     resolve_host,
     wait_for_port,
     wait_for_interface,
+    is_interface_present,
     get_clean_env,
     clean_node_name,
     get_user_home,
@@ -74,6 +76,9 @@ class VPNManager:
         self._last_iface: Optional[str] = None
         self._settings_read_failed: bool = False
         self._storage_lock = threading.RLock()
+        self._connection_lock = threading.Lock()
+        self._connection_generation = 0
+        self._owns_tun = False
 
         os.makedirs(self.bin_dir, exist_ok=True)
         os.makedirs(self.settings_dir, exist_ok=True)
@@ -730,12 +735,27 @@ class VPNManager:
     # ────────────────────────────────────────────────
 
     def start(self, node: Dict[str, Any]) -> bool:
-        """
-        Starts proxy core (Xray or sing-box) + tun2socks and configures full system TUN routing.
-        Uses fast socket & interface polling instead of hardcoded sleeps.
-        """
-        self.stop()
+        """Starts the tunnel, serializing changes from all callers."""
+        with self._connection_lock:
+            return self._start(node)
 
+    def _start(self, node: Dict[str, Any]) -> bool:
+        self._stop()
+        if is_interface_present(TUN_INTERFACE):
+            self.log(f"Cannot connect: interface {TUN_INTERFACE} already exists.")
+            return False
+
+        try:
+            connected = self._setup_tunnel(node)
+        except Exception as e:
+            self.log(f"VPN setup failed: {e}")
+            connected = False
+
+        if not connected:
+            self._stop()
+        return connected
+
+    def _setup_tunnel(self, node: Dict[str, Any]) -> bool:
         is_singbox = node.get("type") in ("hysteria2", "hy2", "tuic", "wireguard", "warp", "awg")
         if is_singbox:
             if not ensure_singbox(self.bin_dir, self.singbox_path, log_func=self.log, plugin_dir=self.plugin_dir):
@@ -750,6 +770,9 @@ class VPNManager:
                 return False
 
         gw_ip, iface = get_default_gateway()
+        if not gw_ip or not iface:
+            self.log("Cannot connect: no default network gateway.")
+            return False
         self.log(f"Detected default gateway: {gw_ip} via {iface}")
 
         server_ip = self.generate_config(node, iface=iface)
@@ -788,7 +811,6 @@ class VPNManager:
                 self.log(f"sing-box started, PID={self.singbox_process.pid}")
             except Exception as e:
                 self.log(f"Failed to spawn sing-box process: {e}")
-                self.stop()
                 return False
         else:
             # Validate config file syntax
@@ -814,14 +836,12 @@ class VPNManager:
                 self.log(f"Xray started, PID={self.xray_process.pid}")
             except Exception as e:
                 self.log(f"Failed to spawn Xray process: {e}")
-                self.stop()
                 return False
 
         # Efficient poll for SOCKS port readiness (up to 2.5s, step 50ms)
         if not wait_for_port(DEFAULT_SOCKS_HOST, DEFAULT_SOCKS_PORT, timeout=2.5, interval=0.05):
             core_name = "sing-box" if is_singbox else "Xray"
             self.log(f"{core_name} failed to bind to {DEFAULT_SOCKS_HOST}:{DEFAULT_SOCKS_PORT} within timeout")
-            self.stop()
             return False
 
         # 2. Start tun2socks
@@ -845,28 +865,30 @@ class VPNManager:
             self.log(f"tun2socks started, PID={self.tun_process.pid}")
         except Exception as e:
             self.log(f"Failed to spawn tun2socks: {e}")
-            self.stop()
             return False
 
-        # Efficient poll for tun0 creation (up to 2.0s, step 50ms)
+        # Poll for TUN creation (up to 2.0s, step 50ms)
         if not wait_for_interface(TUN_INTERFACE, timeout=2.0, interval=0.05):
             self.log(f"Interface {TUN_INTERFACE} was not created in time")
-            self.stop()
             return False
 
-        # 3. Configure IP address, MTU and link state
-        run_command(["ip", "addr", "add", TUN_IP_CIDR, "dev", TUN_INTERFACE])
-        run_command(["ip", "link", "set", "dev", TUN_INTERFACE, "mtu", TUN_MTU, "up"])
+        self._owns_tun = True
+        self._last_server_ip = []
+        self._last_gw_ip = gw_ip
+        self._last_iface = iface
 
-        # Bypass route to VPN server(s) via real default gateway to prevent routing loop
-        if gw_ip and iface:
-            for sip in server_ips:
-                run_command(["ip", "route", "replace", sip, "via", gw_ip, "dev", iface])
+        self._require_command(["ip", "addr", "add", TUN_IP_CIDR, "dev", TUN_INTERFACE])
+        self._require_command(["ip", "link", "set", "dev", TUN_INTERFACE, "mtu", TUN_MTU, "up"])
 
-        # Route default traffic via TUN interface with top priority (metric 1)
-        run_command(["ip", "route", "replace", "default", "dev", TUN_INTERFACE, "metric", "1"])
+        # Keep proxy traffic on the physical network. Never replace an existing host route.
+        for sip in dict.fromkeys(server_ips):
+            self._require_command(["ip", "route", "add", sip, "via", gw_ip, "dev", iface,
+                                   "proto", TUN_ROUTE_PROTOCOL])
+            self._last_server_ip.append(sip)
 
-        # Configure systemd-resolved DNS for tun0
+        self._require_command(["ip", "route", "add", "default", "dev", TUN_INTERFACE,
+                               "metric", "1", "proto", TUN_ROUTE_PROTOCOL])
+
         node_dns = node.get("dns")
         if node_dns:
             if isinstance(node_dns, str):
@@ -876,52 +898,60 @@ class VPNManager:
         else:
             dns_list = DNS_SERVERS
 
-        run_command(["resolvectl", "dns", TUN_INTERFACE] + dns_list)
-        run_command(["resolvectl", "domain", TUN_INTERFACE, "~."])
-        run_command(["resolvectl", "default-route", TUN_INTERFACE, "yes"])
+        self._require_command(["resolvectl", "dns", TUN_INTERFACE] + dns_list)
+        self._require_command(["resolvectl", "domain", TUN_INTERFACE, "~."])
+        self._require_command(["resolvectl", "default-route", TUN_INTERFACE, "yes"])
 
-        self._last_server_ip = server_ips
-        self._last_gw_ip = gw_ip
-        self._last_iface = iface
-
-        settings = self.load_settings()
-        settings["selected_node"] = node
-        settings["_routing_state"] = {
-            "server_ip": server_ips,
-            "gw_ip": gw_ip,
-            "iface": iface,
-        }
-        self.save_settings(settings)
+        with self._storage_lock:
+            settings = self.load_settings()
+            settings["selected_node"] = node
+            settings["_routing_state"] = {
+                "tun_interface": TUN_INTERFACE,
+                "server_ip": self._last_server_ip,
+                "gw_ip": gw_ip,
+                "iface": iface,
+            }
+            self.save_settings(settings)
         self.log(f"VPN connected successfully to: {node.get('name')}")
         return True
 
+    def _require_command(self, command: List[str]) -> None:
+        result = run_command(command)
+        if result is None or result.returncode != 0:
+            detail = result.stderr.strip() if result is not None and result.stderr else "no command output"
+            raise RuntimeError(f"{' '.join(command)}: {detail}")
+
     def stop(self) -> None:
         """Tears down routing and terminates proxy processes safely."""
+        with self._connection_lock:
+            self._stop()
+
+    def _stop(self) -> None:
+        self._connection_generation += 1
         self.log("Stopping VPN (xray/sing-box + tun2socks)...")
 
         settings = self.load_settings()
         routing_state = settings.get("_routing_state") or {}
-        raw_ips = self._last_server_ip or routing_state.get("server_ip")
-        if isinstance(raw_ips, str):
-            server_ips = [raw_ips]
-        elif isinstance(raw_ips, list):
-            server_ips = raw_ips
-        else:
-            server_ips = []
+        owns_saved_tun = routing_state.get("tun_interface") == TUN_INTERFACE
+        if self._owns_tun or owns_saved_tun:
+            run_command(["resolvectl", "revert", TUN_INTERFACE])
+            run_command(["ip", "route", "del", "default", "dev", TUN_INTERFACE, "metric", "1",
+                         "proto", TUN_ROUTE_PROTOCOL])
+            run_command(["ip", "link", "delete", TUN_INTERFACE])
 
-        gw_ip = self._last_gw_ip or routing_state.get("gw_ip")
-        iface = self._last_iface or routing_state.get("iface")
-
-        # 1. Rollback system routing & DNS
-        run_command(["resolvectl", "revert", TUN_INTERFACE])
-        run_command(["ip", "route", "del", "default", "dev", TUN_INTERFACE, "metric", "1"])
+        server_ips = self._last_server_ip
+        gw_ip = self._last_gw_ip
+        iface = self._last_iface
+        if server_ips is None and owns_saved_tun:
+            server_ips = routing_state.get("server_ip")
+            gw_ip = routing_state.get("gw_ip")
+            iface = routing_state.get("iface")
+        if isinstance(server_ips, str):
+            server_ips = [server_ips]
         if gw_ip and iface:
-            for sip in server_ips:
-                run_command(["ip", "route", "del", sip, "via", gw_ip, "dev", iface])
-        else:
-            for sip in server_ips:
-                run_command(["ip", "route", "del", sip])
-        run_command(["ip", "link", "delete", TUN_INTERFACE])
+            for sip in server_ips or []:
+                run_command(["ip", "route", "del", sip, "via", gw_ip, "dev", iface,
+                             "proto", TUN_ROUTE_PROTOCOL])
 
         # 2. Terminate child processes cleanly and reap zombies
         for proc in (self.tun_process, self.xray_process, self.singbox_process, self.process):
@@ -951,64 +981,49 @@ class VPNManager:
         self.xray_process = None
         self.singbox_process = None
         self.process = None
+        self._owns_tun = False
         self._last_server_ip = None
         self._last_gw_ip = None
         self._last_iface = None
 
-        settings["selected_node"] = None
-        settings.pop("_routing_state", None)
-        self.save_settings(settings)
+        with self._storage_lock:
+            settings = self.load_settings()
+            settings["selected_node"] = None
+            settings.pop("_routing_state", None)
+            self.save_settings(settings)
         self.log("VPN stopped cleanly.")
 
     def cleanup_stale(self) -> None:
-        """Cleans up leftover interfaces, routes and processes from ungraceful shutdowns or reboot."""
-        self.log("Cleaning up any stale VPN state...")
-        try:
-            run_command(["resolvectl", "revert", TUN_INTERFACE])
-            run_command(["ip", "route", "del", "default", "dev", TUN_INTERFACE, "metric", "1"])
-            run_command(["ip", "link", "delete", TUN_INTERFACE])
-        except Exception:
-            pass
+        """Cleans up routing and processes previously owned by this plugin."""
+        self.stop()
 
-        for bin_path in (self.tun2socks_path, self.xray_path, self.singbox_path):
-            try:
-                subprocess.run(["pkill", "-15", "-f", bin_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1.0)
-            except Exception:
-                pass
-            try:
-                subprocess.run(["pkill", "-9", "-f", bin_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1.0)
-            except Exception:
-                pass
+    def resume_generation(self) -> Optional[int]:
+        """Identifies the active connection before waiting for the network."""
+        with self._connection_lock:
+            if self.load_settings().get("selected_node"):
+                return self._connection_generation
+            return None
 
-        settings = self.load_settings()
-        if "_routing_state" in settings:
-            settings.pop("_routing_state", None)
-            settings["selected_node"] = None
-            self.save_settings(settings)
+    def recover_after_resume(self, generation: int, network_ready: bool) -> None:
+        """Recovers the same connection unless a newer request superseded it."""
+        with self._connection_lock:
+            if generation != self._connection_generation:
+                return
+            node = self.load_settings().get("selected_node")
+            if node and network_ready:
+                self._start(node)
+            elif node:
+                self._stop()
 
     def is_running(self) -> bool:
         """Verifies if VPN tunnel is actively running."""
-        # 1. Interface check: if tun0 doesn't exist in kernel, VPN is definitely not active
-        if not os.path.exists(f"/sys/class/net/{TUN_INTERFACE}"):
-            return False
-
-        # 2. Check process handles
-        tun_alive = self.tun_process is not None and self.tun_process.poll() is None
-        core_alive = (
-            (self.xray_process is not None and self.xray_process.poll() is None) or
-            (self.singbox_process is not None and self.singbox_process.poll() is None)
+        tun = self.tun_process
+        tun_alive = tun is not None and tun.poll() is None
+        core_alive = any(
+            proc is not None and proc.poll() is None
+            for proc in (self.xray_process, self.singbox_process)
         )
-        if tun_alive and core_alive:
-            return True
-
-        # 3. Fallback: check exact process names
-        try:
-            tun_check = subprocess.run(["pgrep", "-x", "tun2socks"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.5)
-            xray_check = subprocess.run(["pgrep", "-x", "xray"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.5)
-            sb_check = subprocess.run(["pgrep", "-x", "sing-box"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.5)
-            return tun_check.returncode == 0 and (xray_check.returncode == 0 or sb_check.returncode == 0)
-        except Exception:
-            return False
+        return tun_alive and core_alive and is_interface_present(TUN_INTERFACE)
 
     def get_singbox_log(self) -> str:
         """Returns logs from Xray, sing-box and tun2socks."""
@@ -1026,6 +1041,22 @@ class VPNManager:
                 logs.append(f"=== {name} LOGS ===\nNo log file found.")
         return "\n\n".join(logs)
 
+    def save_preset(self, preset: str) -> None:
+        with self._storage_lock:
+            settings = self.load_settings()
+            settings["selected_preset"] = preset
+            self.save_settings(settings)
+        if preset in (PRESET_ROSCOMVPN, PRESET_BYPASS_RU):
+            self.update_geofiles()
+        self._restart_active_tunnel()
+
+    def _restart_active_tunnel(self) -> None:
+        with self._connection_lock:
+            if self.is_running():
+                node = self.load_settings().get("selected_node")
+                if node:
+                    self._start(node)
+
     def update_routing_presets(self) -> Dict[str, Any]:
         """
         Downloads/updates Throne routing profiles and geo assets with atomic overwrite.
@@ -1034,14 +1065,11 @@ class VPNManager:
         from core.routing_updater import update_throne_routing
         res = update_throne_routing(self.settings_dir, self.bin_dir, log_func=self.log)
         if res.get("success"):
-            settings = self.load_settings()
-            settings["last_rules_update"] = int(time.time())
-            self.save_settings(settings)
-            # If actively connected, hot-restart with refreshed rules
-            if self.is_running():
-                node = settings.get("selected_node")
-                if node:
-                    self.start(node)
+            with self._storage_lock:
+                settings = self.load_settings()
+                settings["last_rules_update"] = int(time.time())
+                self.save_settings(settings)
+            self._restart_active_tunnel()
         return res
 
     def generate_warp_node(self, force: bool = True) -> Dict[str, Any]:

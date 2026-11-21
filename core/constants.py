@@ -4,7 +4,7 @@ Single source of truth for URLs, defaults and configuration.
 """
 
 # Plugin version
-PLUGIN_VERSION = "1.2.6"
+PLUGIN_VERSION = "1.2.7"
 
 # Preset identifiers
 PRESET_DEFAULT = "default"        # Full Tunnel
@@ -60,7 +60,8 @@ FREE_SUBSCRIPTIONS = [
 # Network configuration
 DEFAULT_SOCKS_HOST = "127.0.0.1"
 DEFAULT_SOCKS_PORT = 10808
-TUN_INTERFACE = "tun0"
+TUN_INTERFACE = "subdeck0"
+TUN_ROUTE_PROTOCOL = "242"
 TUN_IP_CIDR = "198.18.0.1/15"
 TUN_MTU = "1420"
 DNS_SERVERS = ["8.8.8.8", "1.1.1.1"]
@@ -92,8 +93,11 @@ SUBSCRIPTION_USER_AGENTS = [
 
 # Binary download sources
 XRAY_RELEASE_URL = "https://github.com/XTLS/Xray-core/releases/download/v26.9.30/Xray-linux-64.zip"
+XRAY_RELEASE_SHA256 = "f851110beaff16e78d643f0ccfd9524b4a44dfd59bae3e34bb52bba378f7690e"
 TUN2SOCKS_RELEASE_URL = "https://github.com/xjasonlyu/tun2socks/releases/download/v2.7.0/tun2socks-linux-amd64.zip"
+TUN2SOCKS_RELEASE_SHA256 = "a612baa287a3b6de6221f74fd02b442a50888508227ecf51e1288a5ccbb77381"
 SINGBOX_RELEASE_URL = "https://github.com/SagerNet/sing-box/releases/download/v1.14.3/sing-box-1.14.3-linux-amd64.tar.gz"
+SINGBOX_RELEASE_SHA256 = "e2bdf179c15a3652955dc44867e33ca0965c9c9b91b34267dcc5a5d639a5feee"
 
 # Throne routing profiles sources
 THRONE_ROUTING_PROFILES = {

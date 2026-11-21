@@ -19,7 +19,7 @@ A Decky Loader plugin for Steam Deck that allows you to manage VLESS, VMess, Tro
 - **Desktop Mode System Tray Widget**: Full-featured system tray companion with an elegant pop-up widget for Desktop Mode. Manage VPN connections, toggle servers, add/refresh subscriptions and switch routing presets without opening Steam Big Picture!
 - **Multi-Protocol Support**: VLESS (Reality, TLS, None), VMess, Trojan, Shadowsocks, and Hysteria 2 / Hy2.
 - **Multiple Subscriptions**: Add and manage different subscription URLs simultaneously. Nodes from all subscriptions are automatically combined.
-- **System-wide TUN Routing**: Automatically routes all Steam Deck internet traffic through `sing-box` TUN interface (`tun0`).
+- **System-wide TUN Routing**: Automatically routes all Steam Deck internet traffic through `sing-box` TUN interface (`subdeck0`).
 - **Routing Presets**: Support for **"Default"** mode (all traffic through VPN) and **[RoscomVPN](https://github.com/hydraponique/roscomvpn-routing)** mode (smart routing bypass: Steam, Twitch, and RU/BY websites directly, blocked resources via VPN, ads & telemetry are blocked).
 - **One-click Toggle**: Connect by simply clicking the server in the list, click again to disconnect.
 - **Quick Logging**: Click the **LOG** button to write combined plugin & core logs to `/home/deck/sub-deck.log` and copy them to your clipboard.

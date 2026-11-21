@@ -3,17 +3,22 @@ Binary and asset manager for Xray-core, tun2socks and GeoIP/Geosite databases.
 Handles defaults restoration, downloads, and permission management.
 """
 
+import hashlib
+import http.client
 import os
 import shutil
 import ssl
 import subprocess
+import tempfile
 import time
 import urllib.request
 import zipfile
 from typing import Optional, Callable
 
 from core.constants import (
+    XRAY_RELEASE_SHA256,
     XRAY_RELEASE_URL,
+    TUN2SOCKS_RELEASE_SHA256,
     TUN2SOCKS_RELEASE_URL,
     GEOIP_RELEASE_URL,
     GEOSITE_RELEASE_URL,
@@ -28,27 +33,41 @@ def is_executable(path: str) -> bool:
     return os.path.isfile(path) and os.access(path, os.X_OK)
 
 
-def download_file(url: str, target_path: str, min_size: int = 0, timeout: float = 60.0) -> bool:
-    """Downloads a remote file with size verification and atomic write."""
-    ctx = ssl._create_unverified_context()
-    tmp_path = f"{target_path}.tmp"
+def download_file(
+    url: str,
+    target_path: str,
+    min_size: int = 0,
+    timeout: float = 60.0,
+    *,
+    expected_sha256: Optional[str] = None,
+) -> bool:
+    """Downloads over verified TLS and checks the payload before replacing the target."""
+    tmp_path = None
     try:
+        ctx = ssl.create_default_context()
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
         with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
             data = resp.read()
-            if min_size > 0 and len(data) < min_size:
-                raise ValueError(f"Downloaded payload too small: {len(data)} bytes < {min_size}")
-            with open(tmp_path, "wb") as f:
-                f.write(data)
+        if len(data) < min_size:
+            return False
+        if expected_sha256 is not None and hashlib.sha256(data).hexdigest() != expected_sha256:
+            return False
+
+        with tempfile.NamedTemporaryFile(dir=os.path.dirname(target_path) or ".", delete=False) as output:
+            tmp_path = output.name
+            output.write(data)
+        os.chmod(tmp_path, 0o644)
         os.replace(tmp_path, target_path)
+        tmp_path = None
         return True
-    except Exception:
-        if os.path.exists(tmp_path):
-            try:
-                os.remove(tmp_path)
-            except Exception:
-                pass
+    except (OSError, ValueError, http.client.HTTPException):
         return False
+    finally:
+        if tmp_path is not None:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
 
 def copy_from_defaults(src_path: str, dst_path: str, make_executable: bool = False) -> bool:
@@ -113,7 +132,9 @@ def ensure_xray_and_tun(
         if log_func:
             log_func("Downloading Xray-core binary...")
         zip_path = os.path.join(bin_dir, "xray.zip")
-        if download_file(XRAY_RELEASE_URL, zip_path, timeout=90.0):
+        if download_file(
+            XRAY_RELEASE_URL, zip_path, timeout=90.0, expected_sha256=XRAY_RELEASE_SHA256
+        ):
             try:
                 with zipfile.ZipFile(zip_path, "r") as z:
                     z.extract("xray", path=bin_dir)
@@ -140,7 +161,9 @@ def ensure_xray_and_tun(
         if log_func:
             log_func("Downloading tun2socks binary...")
         zip_path = os.path.join(bin_dir, "tun2socks.zip")
-        if download_file(TUN2SOCKS_RELEASE_URL, zip_path, timeout=60.0):
+        if download_file(
+            TUN2SOCKS_RELEASE_URL, zip_path, timeout=60.0, expected_sha256=TUN2SOCKS_RELEASE_SHA256
+        ):
             try:
                 with zipfile.ZipFile(zip_path, "r") as z:
                     for name in z.namelist():
@@ -217,11 +240,13 @@ def ensure_singbox(
 
     # 2. Remote download fallback
     import tarfile
-    from core.constants import SINGBOX_RELEASE_URL
+    from core.constants import SINGBOX_RELEASE_SHA256, SINGBOX_RELEASE_URL
     tar_path = os.path.join(bin_dir, "sing-box.tar.gz")
     if log_func:
         log_func("Downloading sing-box binary for Hysteria 2 / TUIC / AWG protocols...")
-    if download_file(SINGBOX_RELEASE_URL, tar_path, timeout=60.0):
+    if download_file(
+        SINGBOX_RELEASE_URL, tar_path, timeout=60.0, expected_sha256=SINGBOX_RELEASE_SHA256
+    ):
         try:
             with tarfile.open(tar_path, "r:gz") as tar:
                 for member in tar.getmembers():

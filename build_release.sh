@@ -56,7 +56,7 @@ done
 # 6. Подготовка чистого каталога дистрибуции
 echo "==> 5. Формирование каталога релиза..."
 OUT_DIR="$SCRIPT_DIR/out"
-STAGING_DIR="/tmp/sub-deck-build-$$"
+STAGING_DIR="$(mktemp -d)"
 mkdir -p "$OUT_DIR" "$STAGING_DIR/sub-deck"
 trap 'rm -rf "$STAGING_DIR"' EXIT
 
@@ -69,7 +69,9 @@ cp -a logo.png screenshot.png "$STAGING_DIR/sub-deck/" 2>/dev/null || true
 rsync -a --exclude '__pycache__' --exclude '*.pyc' dist/ "$STAGING_DIR/sub-deck/dist/"
 rsync -a --exclude '__pycache__' --exclude '*.pyc' core/ "$STAGING_DIR/sub-deck/core/"
 rsync -a --exclude '__pycache__' --exclude '*.pyc' tray/ "$STAGING_DIR/sub-deck/tray/"
-rsync -a defaults/ "$STAGING_DIR/sub-deck/defaults/"
+mkdir -p "$STAGING_DIR/sub-deck/defaults/bin"
+cp defaults/{defaults.txt,geoip.dat,geosite.dat,geoip.db,geosite.db} "$STAGING_DIR/sub-deck/defaults/"
+cp defaults/bin/{xray,tun2socks,sing-box} "$STAGING_DIR/sub-deck/defaults/bin/"
 [ -d assets ] && rsync -a assets/ "$STAGING_DIR/sub-deck/assets/"
 
 # Нормализация прав
@@ -81,8 +83,8 @@ chmod 755 "$STAGING_DIR/sub-deck/defaults/bin/"* 2>/dev/null || true
 echo "==> 6. Упаковка zip-архива..."
 RELEASE_ZIP="$OUT_DIR/sub-deck.zip"
 
-rm -f "$RELEASE_ZIP" "$OUT_DIR/sub-deck-v"*.zip 2>/dev/null || true
-(cd "$STAGING_DIR" && zip -r -9 "$RELEASE_ZIP" sub-deck)
+(cd "$STAGING_DIR" && zip -r -9 sub-deck.zip sub-deck)
+mv -f "$STAGING_DIR/sub-deck.zip" "$RELEASE_ZIP"
 
 # 8. Контрольная сумма SHA256
 SHA256=$(sha256sum "$RELEASE_ZIP" | cut -d' ' -f1)

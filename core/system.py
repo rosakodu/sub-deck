@@ -11,6 +11,8 @@ import time
 import ipaddress
 from typing import Optional, Tuple, Dict
 
+from core.constants import TUN_INTERFACE
+
 
 def get_user_home() -> str:
     """Accurately discovers non-root user home directory on SteamOS."""
@@ -78,7 +80,7 @@ def run_command(cmd_list, as_root: bool = True, timeout: Optional[float] = 10.0)
         return None
 
 
-def get_default_gateway(ignore_interface: Optional[str] = "tun0") -> Tuple[Optional[str], Optional[str]]:
+def get_default_gateway(ignore_interface: Optional[str] = TUN_INTERFACE) -> Tuple[Optional[str], Optional[str]]:
     """Discovers the active default gateway IP and outbound physical network interface."""
     try:
         res = subprocess.run(["ip", "route", "show", "default"], stdout=subprocess.PIPE, text=True, timeout=2)
@@ -131,8 +133,7 @@ def wait_for_port(host: str, port: int, timeout: float = 2.0, interval: float = 
 
 def is_interface_present(interface_name: str) -> bool:
     """Checks whether a network interface exists in the system."""
-    res = subprocess.run(["ip", "link", "show", "dev", interface_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    return res.returncode == 0
+    return os.path.exists(f"/sys/class/net/{interface_name}")
 
 
 def wait_for_interface(interface_name: str, timeout: float = 2.0, interval: float = 0.05) -> bool:

@@ -8,8 +8,8 @@ echo "🔨 Building frontend with pnpm..."
 pnpm run build
 
 echo "📦 Creating release structure..."
-BUILD_DIR="/tmp/${PLUGIN_NAME}_build"
-rm -rf "${BUILD_DIR}" "${ZIP_NAME}"
+BUILD_DIR="$(mktemp -d)"
+trap 'rm -rf "$BUILD_DIR"' EXIT
 mkdir -p "${BUILD_DIR}/${PLUGIN_NAME}"
 
 # Copy plugin root files
@@ -31,8 +31,12 @@ mkdir -p "${BUILD_DIR}/${PLUGIN_NAME}/tray"
 cp -r tray/* "${BUILD_DIR}/${PLUGIN_NAME}/tray/"
 
 [ -d assets ] && cp -r assets "${BUILD_DIR}/${PLUGIN_NAME}/"
-[ -d defaults ] && cp -r defaults "${BUILD_DIR}/${PLUGIN_NAME}/"
-rm -rf "${BUILD_DIR}/${PLUGIN_NAME}/defaults/bin"
+mkdir -p "${BUILD_DIR}/${PLUGIN_NAME}/defaults"
+for asset in defaults.txt geoip.dat geosite.dat geoip.db geosite.db; do
+  if [[ -f "defaults/$asset" ]]; then
+    cp "defaults/$asset" "${BUILD_DIR}/${PLUGIN_NAME}/defaults/"
+  fi
+done
 [ -d py_modules ] && cp -r py_modules "${BUILD_DIR}/${PLUGIN_NAME}/"
 
 echo "🗜️ Packaging ${ZIP_NAME}..."
@@ -41,7 +45,6 @@ zip -r "${ZIP_NAME}" "${PLUGIN_NAME}" -x "*.git*" "*__pycache__*" "*.pyc" "*node
 cd - > /dev/null
 
 mv "${BUILD_DIR}/${ZIP_NAME}" "./${ZIP_NAME}"
-rm -rf "${BUILD_DIR}"
 
 echo "✅ Package ready: ${ZIP_NAME}"
 ls -lh "${ZIP_NAME}"
