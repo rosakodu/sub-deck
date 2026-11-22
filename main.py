@@ -309,8 +309,7 @@ class Plugin:
         return success
 
     async def disconnect(self) -> bool:
-        await self.loop.run_in_executor(None, self.vpn.stop)
-        return True
+        return await self.loop.run_in_executor(None, self.vpn.stop)
 
     async def is_connected(self) -> bool:
         return self.vpn.is_running()

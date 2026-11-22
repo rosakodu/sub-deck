@@ -22,7 +22,7 @@ class TunnelLifecycleTests(unittest.TestCase):
         self.manager = VPNManager(str(root), str(root), logger=Mock())
         self.commands = []
         self.failure = None
-        stack.enter_context(patch("vpn_manager.run_command", side_effect=self.run_command))
+        stack.enter_context(patch("core.tunnel_routing.run_command", side_effect=self.run_command))
         stack.enter_context(patch("vpn_manager.subprocess.run"))
         self.spawn = stack.enter_context(patch("vpn_manager.subprocess.Popen"))
         self.core = Mock(pid=1)
@@ -71,6 +71,91 @@ class TunnelLifecycleTests(unittest.TestCase):
 
         self.assertEqual(self.spawn.call_count, 2)
         self.assertIsNone(self.manager.resume_generation())
+
+    def test_stale_cleanup_accepts_saved_single_server_ip(self):
+        settings = self.manager.load_settings()
+        settings["_routing_state"] = {
+            "tun_interface": TUN_INTERFACE,
+            "server_ip": self.node["server"],
+            "gw_ip": self.gateway,
+            "iface": self.interface,
+        }
+        self.manager.save_settings(settings)
+
+        self.manager.cleanup_stale()
+
+        self.assertIn(["ip", "route", "del", self.node["server"], "via", self.gateway, "dev",
+                       self.interface, "proto", TUN_ROUTE_PROTOCOL], self.commands)
+        self.assertNotIn("_routing_state", self.manager.load_settings())
+
+    def test_resume_timeout_clears_connection_without_retry(self):
+        self.assertTrue(self.manager.start(self.node))
+        generation = self.manager.resume_generation()
+
+        self.manager.recover_after_resume(generation, network_ready=False)
+
+        self.assertIsNone(self.manager.resume_generation())
+        self.assertIsNone(self.manager.load_settings().get("selected_node"))
+        self.assertEqual(self.spawn.call_count, 2)
+
+    def test_failed_route_cleanup_survives_restart_and_is_retried(self):
+        self.assertTrue(self.manager.start(self.node))
+        route = [self.node["server"], "via", self.gateway, "dev", self.interface,
+                 "proto", TUN_ROUTE_PROTOCOL]
+        delete = ["ip", "route", "del", *route]
+        probe = ["ip", "route", "show", "exact", *route]
+
+        def fail_host_route(command):
+            if command == delete:
+                return subprocess.CompletedProcess(command, 1, "", "permission denied")
+            if command == probe:
+                return subprocess.CompletedProcess(command, 0, "owned route still present", "")
+            return self.run_command(command)
+
+        with patch("core.tunnel_routing.run_command", side_effect=fail_host_route):
+            self.assertFalse(self.manager.stop())
+
+        settings = self.manager.load_settings()
+        self.assertIsNone(settings["selected_node"])
+        self.assertEqual(settings["_routing_state"]["server_ip"], [self.node["server"]])
+        self.assertFalse(settings["_routing_state"]["cleanup_tun"])
+        self.manager._logger.info.assert_any_call("VPN cleanup failed: " + " ".join(delete) + ": permission denied")
+
+        restarted = VPNManager(self.manager.plugin_dir, self.manager.settings_dir, logger=Mock())
+        self.commands.clear()
+        self.assertTrue(restarted.stop())
+        self.assertEqual(self.commands, [delete])
+        self.assertNotIn("_routing_state", restarted.load_settings())
+
+    def test_already_missing_routes_and_interface_count_as_clean(self):
+        self.assertTrue(self.manager.start(self.node))
+
+        def missing(command):
+            if command[:4] == ["ip", "route", "show", "exact"]:
+                return subprocess.CompletedProcess(command, 0, "", "")
+            return subprocess.CompletedProcess(command, 1, "", "not found")
+
+        with (
+            patch("core.tunnel_routing.run_command", side_effect=missing),
+            patch("core.tunnel_routing.is_interface_present", return_value=False),
+        ):
+            self.assertTrue(self.manager.stop())
+
+        self.assertNotIn("_routing_state", self.manager.load_settings())
+
+    def test_interface_that_could_not_be_removed_blocks_reconnect(self):
+        self.assertTrue(self.manager.start(self.node))
+
+        with (
+            patch("core.tunnel_routing.is_interface_present", return_value=True),
+            patch("core.tunnel_routing.run_command", side_effect=lambda command:
+                  subprocess.CompletedProcess(command, int(command[:3] == ["ip", "link", "delete"]),
+                                              "", "interface busy")),
+        ):
+            self.assertFalse(self.manager.start(self.node))
+
+        self.assertEqual(self.spawn.call_count, 2)
+        self.assertIn("_routing_state", self.manager.load_settings())
 
 
 class SuspendMonitorTests(unittest.IsolatedAsyncioTestCase):

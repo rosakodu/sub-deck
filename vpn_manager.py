@@ -4,11 +4,8 @@ Coordinates proxy cores (Xray-core + tun2socks), routing and subscription states
 """
 
 import os
-import sys
 import json
-import shutil
 import subprocess
-import tempfile
 import threading
 import time
 from typing import Dict, List, Optional, Any
@@ -17,10 +14,6 @@ from core.constants import (
     DEFAULT_SOCKS_HOST,
     DEFAULT_SOCKS_PORT,
     TUN_INTERFACE,
-    TUN_ROUTE_PROTOCOL,
-    TUN_IP_CIDR,
-    TUN_MTU,
-    DNS_SERVERS,
     PRESET_DEFAULT,
     PRESET_BYPASS_RU,
     PRESET_GAMING,
@@ -29,7 +22,6 @@ from core.constants import (
     RU_BYPASS_DOMAINS,
 )
 from core.system import (
-    run_command,
     get_default_gateway,
     resolve_host,
     wait_for_port,
@@ -37,8 +29,6 @@ from core.system import (
     is_interface_present,
     get_clean_env,
     clean_node_name,
-    get_user_home,
-    get_target_uid_gid,
 )
 from core.binaries import ensure_xray_and_tun, ensure_singbox, update_geofiles
 from core.parsers import parse_subscription_nodes
@@ -49,6 +39,8 @@ from core.xray_config import (
     validate_xray_config,
 )
 from core.pinger import check_nodes_ping
+from core.subscription_storage import SubscriptionStorage
+from core.tunnel_routing import TunnelRouting
 
 
 class VPNManager:
@@ -71,14 +63,10 @@ class VPNManager:
         self.tun_process: Optional[subprocess.Popen] = None
         self.process = None  # Backward compatibility alias
         self._logger = logger
-        self._last_server_ip: Optional[str] = None
-        self._last_gw_ip: Optional[str] = None
-        self._last_iface: Optional[str] = None
-        self._settings_read_failed: bool = False
-        self._storage_lock = threading.RLock()
+        self._storage = SubscriptionStorage(settings_dir, fallback_settings_dir, self.log)
         self._connection_lock = threading.Lock()
         self._connection_generation = 0
-        self._owns_tun = False
+        self._routing = TunnelRouting(self.log)
 
         os.makedirs(self.bin_dir, exist_ok=True)
         os.makedirs(self.settings_dir, exist_ok=True)
@@ -90,206 +78,21 @@ class VPNManager:
         else:
             print(msg)
 
-    def _get_target_dirs(self) -> List[str]:
-        """Returns ordered list of directories for dual-persistence: primary settings dir and fallback user home dir."""
-        dirs = [self.settings_dir]
-        fallback_dir = self.fallback_settings_dir
-        if fallback_dir is None and "unittest" not in sys.modules and "pytest" not in sys.modules:
-            fallback_dir = os.path.join(get_user_home(), ".config", "sub-deck")
-
-        if fallback_dir and os.path.abspath(fallback_dir) != os.path.abspath(self.settings_dir):
-            dirs.append(fallback_dir)
-        return dirs
-
-    def _sync_dual_persistence(self, filename: str) -> None:
-        """Synchronizes file and its .bak between all target dirs if one exists and the other is missing/empty."""
-        dirs = self._get_target_dirs()
-        if len(dirs) < 2:
-            return
-
-        for name in (filename, filename + ".bak"):
-            # Find a directory that has a non-empty valid file
-            source_file = None
-            for d in dirs:
-                fpath = os.path.join(d, name)
-                if os.path.isfile(fpath) and os.path.getsize(fpath) > 0:
-                    source_file = fpath
-                    break
-
-            if source_file:
-                for d in dirs:
-                    dest_file = os.path.join(d, name)
-                    if not os.path.isfile(dest_file) or os.path.getsize(dest_file) == 0:
-                        try:
-                            os.makedirs(d, exist_ok=True)
-                            self._ensure_file_permissions(d)
-                            shutil.copy2(source_file, dest_file)
-                            self._ensure_file_permissions(dest_file)
-                            self.log(f"Recovered {dest_file} from {source_file}")
-                        except Exception as e:
-                            self.log(f"Failed to recover {dest_file} from {source_file}: {e}")
-
-    def _ensure_file_permissions(self, path: str, mode: int = 0o666) -> None:
-        """Sets safe permissions and ownership to user deck if running as root."""
-        try:
-            if os.path.isdir(path):
-                os.chmod(path, 0o755)
-            else:
-                os.chmod(path, mode)
-        except Exception:
-            pass
-
-        if os.geteuid() == 0:
-            try:
-                uid, gid = get_target_uid_gid()
-                os.chown(path, uid, gid)
-            except Exception:
-                pass
-
-    def _atomic_write_file(self, target_dir: str, filename: str, data: Any) -> bool:
-        """Writes JSON data atomically with fsync and ensures permissions."""
-        os.makedirs(target_dir, exist_ok=True)
-        self._ensure_file_permissions(target_dir)
-
-        target_file = os.path.join(target_dir, filename)
-        tmp_file = None
-        try:
-            with tempfile.NamedTemporaryFile("w", dir=target_dir, delete=False, encoding="utf-8") as f:
-                tmp_file = f.name
-                json.dump(data, f, indent=2 if isinstance(data, dict) else None)
-                f.flush()
-                os.fsync(f.fileno())
-            self._ensure_file_permissions(tmp_file)
-            os.replace(tmp_file, target_file)
-            self._ensure_file_permissions(target_file)
-            return True
-        except Exception as e:
-            self.log(f"Failed atomic write to {target_file}: {e}")
-            if tmp_file and os.path.exists(tmp_file):
-                try:
-                    os.remove(tmp_file)
-                except Exception:
-                    pass
-            return False
-
-    def _backup_file_if_valid(self, target_dir: str, filename: str, expected_type: type) -> None:
-        """Copies target_file to .bak in target_dir if current file is valid JSON of expected_type."""
-        target_file = os.path.join(target_dir, filename)
-        bak_file = target_file + ".bak"
-        if os.path.exists(target_file) and os.path.getsize(target_file) > 0:
-            try:
-                with open(target_file, "r", encoding="utf-8") as f:
-                    content = json.load(f)
-                if isinstance(content, expected_type):
-                    shutil.copy2(target_file, bak_file)
-                    self._ensure_file_permissions(bak_file)
-                else:
-                    self.log(f"Preserving existing {filename}.bak: primary JSON is not {expected_type.__name__}.")
-            except Exception as e:
-                self.log(f"Preserving existing {filename}.bak: primary file is invalid JSON: {e}")
-
-    # ────────────────────────────────────────────────
-    # Settings and cache persistence
-    # ────────────────────────────────────────────────
+    @property
+    def _settings_read_failed(self) -> bool:
+        return self._storage.settings_read_failed
 
     def load_settings(self) -> Dict[str, Any]:
-        """Loads plugin configuration and migrates legacy keys if needed, with dual-persistence and .bak fallback."""
-        with self._storage_lock:
-            # Sync across primary and fallback directories if needed
-            self._sync_dual_persistence("settings.json")
-
-            dirs = self._get_target_dirs()
-            # 1. Try loading primary or fallback settings
-            for d in dirs:
-                s_file = os.path.join(d, "settings.json")
-                if os.path.exists(s_file) and os.path.getsize(s_file) > 0:
-                    try:
-                        with open(s_file, "r", encoding="utf-8") as f:
-                            settings = json.load(f)
-                            if isinstance(settings, dict):
-                                if "subscription_url" in settings and "subscriptions" not in settings:
-                                    old_url = settings.get("subscription_url", "")
-                                    settings["subscriptions"] = [old_url] if old_url else []
-                                self._settings_read_failed = False
-                                return settings
-                    except Exception as e:
-                        self.log(f"Error reading primary settings from {s_file}: {e}")
-
-            # 2. Try loading backup file (.bak) from any target dir
-            for d in dirs:
-                bak_file = os.path.join(d, "settings.json.bak")
-                if os.path.exists(bak_file) and os.path.getsize(bak_file) > 0:
-                    try:
-                        with open(bak_file, "r", encoding="utf-8") as f:
-                            settings = json.load(f)
-                            if isinstance(settings, dict):
-                                if "subscription_url" in settings and "subscriptions" not in settings:
-                                    old_url = settings.get("subscription_url", "")
-                                    settings["subscriptions"] = [old_url] if old_url else []
-                                self.log(f"Loaded settings from backup file ({bak_file}) due to primary failure.")
-                                self._settings_read_failed = False
-                                return settings
-                    except Exception as e:
-                        self.log(f"Error reading backup settings ({bak_file}): {e}")
-
-            # If any settings file exists on disk but couldn't be decoded, flag the read failure
-            if any(os.path.exists(os.path.join(d, "settings.json")) for d in dirs):
-                self._settings_read_failed = True
-            else:
-                self._settings_read_failed = False
-
-            return {"subscriptions": [], "selected_node": None}
+        return self._storage.load_settings()
 
     def save_settings(self, settings: Dict[str, Any]) -> None:
-        """Persists settings atomically to both primary and fallback directories with fsync and .bak backup."""
-        with self._storage_lock:
-            dirs = self._get_target_dirs()
-            for d in dirs:
-                self._backup_file_if_valid(d, "settings.json", dict)
-                self._atomic_write_file(d, "settings.json", settings)
-            self._settings_read_failed = False
+        self._storage.save_settings(settings)
 
     def get_nodes(self) -> List[Dict[str, Any]]:
         """Returns cached proxy nodes, prepending the auto least-ping virtual node if multiple nodes exist."""
-        with self._storage_lock:
-            self._sync_dual_persistence("nodes.json")
-
+        with self._storage.lock:
+            raw_nodes = self._storage.load_nodes()
             nodes = []
-            raw_nodes = None
-            dirs = self._get_target_dirs()
-
-            for d in dirs:
-                n_file = os.path.join(d, "nodes.json")
-                if os.path.exists(n_file) and os.path.getsize(n_file) > 0:
-                    try:
-                        with open(n_file, "r", encoding="utf-8") as f:
-                            raw_nodes = json.load(f)
-                        if isinstance(raw_nodes, list):
-                            break
-                        else:
-                            self.log(f"Nodes cache {n_file} is not a JSON list, trying next.")
-                            raw_nodes = None
-                    except Exception as e:
-                        self.log(f"Error reading nodes cache from {n_file}: {e}")
-                        raw_nodes = None
-
-            if raw_nodes is None:
-                for d in dirs:
-                    bak_file = os.path.join(d, "nodes.json.bak")
-                    if os.path.exists(bak_file) and os.path.getsize(bak_file) > 0:
-                        try:
-                            with open(bak_file, "r", encoding="utf-8") as f:
-                                raw_nodes = json.load(f)
-                            if isinstance(raw_nodes, list):
-                                self.log(f"Loaded nodes from backup cache ({bak_file}) due to primary cache failure.")
-                                break
-                            else:
-                                self.log(f"Backup nodes cache ({bak_file}) is not a JSON list.")
-                                raw_nodes = None
-                        except Exception as e:
-                            self.log(f"Error reading backup nodes cache ({bak_file}): {e}")
-                            raw_nodes = None
-
             if isinstance(raw_nodes, list):
                 for n in raw_nodes:
                     if isinstance(n, dict):
@@ -326,7 +129,7 @@ class VPNManager:
 
     def save_nodes(self, nodes: List[Dict[str, Any]], force: bool = False) -> None:
         """Persists nodes list to disk atomically to both primary and fallback directories with fsync and .bak backup. Never overwrites with empty unless force=True."""
-        with self._storage_lock:
+        with self._storage.lock:
             clean_nodes = [n for n in nodes if n.get("type") != "auto_balancer"]
 
             # Prevent wiping existing cache with empty list unless explicitly forced
@@ -337,11 +140,7 @@ class VPNManager:
                     self.log("save_nodes: refusing to overwrite existing nodes with empty list without force=True. Preserving cached nodes.")
                     return
 
-            dirs = self._get_target_dirs()
-            for d in dirs:
-                self._backup_file_if_valid(d, "nodes.json", list)
-                self._atomic_write_file(d, "nodes.json", clean_nodes)
-            self.log(f"Saved total of {len(clean_nodes)} nodes to cache across {len(dirs)} locations.")
+            self._storage.save_nodes(clean_nodes)
 
     # ────────────────────────────────────────────────
     # Subscription Management
@@ -369,7 +168,7 @@ class VPNManager:
 
     def parse_all_subscriptions(self) -> List[Dict[str, Any]]:
         """Refreshes all subscribed endpoints, updates metadata and aggregates nodes."""
-        with self._storage_lock:
+        with self._storage.lock:
             settings = self.load_settings()
             urls = settings.get("subscriptions", [])
             current_cached_nodes = self.load_nodes()
@@ -422,7 +221,7 @@ class VPNManager:
 
     def add_subscription(self, url: str) -> List[Dict[str, Any]]:
         """Adds a single subscription and updates the node pool."""
-        with self._storage_lock:
+        with self._storage.lock:
             settings = self.load_settings()
             subscriptions = settings.get("subscriptions", [])
             if url not in subscriptions:
@@ -434,7 +233,7 @@ class VPNManager:
 
     def add_multiple_subscriptions(self, urls: List[str]) -> List[Dict[str, Any]]:
         """Bulk adds subscriptions."""
-        with self._storage_lock:
+        with self._storage.lock:
             settings = self.load_settings()
             subscriptions = settings.get("subscriptions", [])
             updated = False
@@ -450,7 +249,7 @@ class VPNManager:
 
     def remove_subscription(self, url: str) -> List[Dict[str, Any]]:
         """Removes a subscription URL and prunes associated nodes and metadata."""
-        with self._storage_lock:
+        with self._storage.lock:
             settings = self.load_settings()
             subscriptions = settings.get("subscriptions", [])
             if url in subscriptions:
@@ -476,7 +275,7 @@ class VPNManager:
             self.log(f"Error parsing subscription {url}: {e}")
             new_nodes, interval, meta = [], None, {}
 
-        with self._storage_lock:
+        with self._storage.lock:
             current_nodes = self.load_nodes()
             # Non-destructive caching: if new_nodes is empty (network error, blocked, timeout),
             # do NOT wipe old nodes of this subscription!
@@ -740,7 +539,9 @@ class VPNManager:
             return self._start(node)
 
     def _start(self, node: Dict[str, Any]) -> bool:
-        self._stop()
+        if not self._stop():
+            self.log("Cannot connect: previous VPN routes could not be removed.")
+            return False
         if is_interface_present(TUN_INTERFACE):
             self.log(f"Cannot connect: interface {TUN_INTERFACE} already exists.")
             return False
@@ -872,86 +673,27 @@ class VPNManager:
             self.log(f"Interface {TUN_INTERFACE} was not created in time")
             return False
 
-        self._owns_tun = True
-        self._last_server_ip = []
-        self._last_gw_ip = gw_ip
-        self._last_iface = iface
+        routing_state = self._routing.configure(gw_ip, iface, server_ips, node.get("dns"))
 
-        self._require_command(["ip", "addr", "add", TUN_IP_CIDR, "dev", TUN_INTERFACE])
-        self._require_command(["ip", "link", "set", "dev", TUN_INTERFACE, "mtu", TUN_MTU, "up"])
-
-        # Keep proxy traffic on the physical network. Never replace an existing host route.
-        for sip in dict.fromkeys(server_ips):
-            self._require_command(["ip", "route", "add", sip, "via", gw_ip, "dev", iface,
-                                   "proto", TUN_ROUTE_PROTOCOL])
-            self._last_server_ip.append(sip)
-
-        self._require_command(["ip", "route", "add", "default", "dev", TUN_INTERFACE,
-                               "metric", "1", "proto", TUN_ROUTE_PROTOCOL])
-
-        node_dns = node.get("dns")
-        if node_dns:
-            if isinstance(node_dns, str):
-                dns_list = [d.strip() for d in node_dns.split(",") if d.strip()]
-            else:
-                dns_list = [str(d).strip() for d in node_dns if str(d).strip()]
-        else:
-            dns_list = DNS_SERVERS
-
-        self._require_command(["resolvectl", "dns", TUN_INTERFACE] + dns_list)
-        self._require_command(["resolvectl", "domain", TUN_INTERFACE, "~."])
-        self._require_command(["resolvectl", "default-route", TUN_INTERFACE, "yes"])
-
-        with self._storage_lock:
+        with self._storage.lock:
             settings = self.load_settings()
             settings["selected_node"] = node
-            settings["_routing_state"] = {
-                "tun_interface": TUN_INTERFACE,
-                "server_ip": self._last_server_ip,
-                "gw_ip": gw_ip,
-                "iface": iface,
-            }
+            settings["_routing_state"] = routing_state
             self.save_settings(settings)
         self.log(f"VPN connected successfully to: {node.get('name')}")
         return True
 
-    def _require_command(self, command: List[str]) -> None:
-        result = run_command(command)
-        if result is None or result.returncode != 0:
-            detail = result.stderr.strip() if result is not None and result.stderr else "no command output"
-            raise RuntimeError(f"{' '.join(command)}: {detail}")
-
-    def stop(self) -> None:
-        """Tears down routing and terminates proxy processes safely."""
+    def stop(self) -> bool:
+        """Stops the proxy processes and reports whether routing was cleaned up."""
         with self._connection_lock:
-            self._stop()
+            return self._stop()
 
-    def _stop(self) -> None:
+    def _stop(self) -> bool:
         self._connection_generation += 1
         self.log("Stopping VPN (xray/sing-box + tun2socks)...")
 
         settings = self.load_settings()
-        routing_state = settings.get("_routing_state") or {}
-        owns_saved_tun = routing_state.get("tun_interface") == TUN_INTERFACE
-        if self._owns_tun or owns_saved_tun:
-            run_command(["resolvectl", "revert", TUN_INTERFACE])
-            run_command(["ip", "route", "del", "default", "dev", TUN_INTERFACE, "metric", "1",
-                         "proto", TUN_ROUTE_PROTOCOL])
-            run_command(["ip", "link", "delete", TUN_INTERFACE])
-
-        server_ips = self._last_server_ip
-        gw_ip = self._last_gw_ip
-        iface = self._last_iface
-        if server_ips is None and owns_saved_tun:
-            server_ips = routing_state.get("server_ip")
-            gw_ip = routing_state.get("gw_ip")
-            iface = routing_state.get("iface")
-        if isinstance(server_ips, str):
-            server_ips = [server_ips]
-        if gw_ip and iface:
-            for sip in server_ips or []:
-                run_command(["ip", "route", "del", sip, "via", gw_ip, "dev", iface,
-                             "proto", TUN_ROUTE_PROTOCOL])
+        pending_cleanup = self._routing.clear(settings.get("_routing_state") or {})
 
         # 2. Terminate child processes cleanly and reap zombies
         for proc in (self.tun_process, self.xray_process, self.singbox_process, self.process):
@@ -981,17 +723,20 @@ class VPNManager:
         self.xray_process = None
         self.singbox_process = None
         self.process = None
-        self._owns_tun = False
-        self._last_server_ip = None
-        self._last_gw_ip = None
-        self._last_iface = None
 
-        with self._storage_lock:
+        with self._storage.lock:
             settings = self.load_settings()
             settings["selected_node"] = None
-            settings.pop("_routing_state", None)
+            if pending_cleanup:
+                settings["_routing_state"] = pending_cleanup
+            else:
+                settings.pop("_routing_state", None)
             self.save_settings(settings)
+        if pending_cleanup:
+            self.log("VPN processes stopped, but routing cleanup is pending.")
+            return False
         self.log("VPN stopped cleanly.")
+        return True
 
     def cleanup_stale(self) -> None:
         """Cleans up routing and processes previously owned by this plugin."""
@@ -1042,7 +787,7 @@ class VPNManager:
         return "\n\n".join(logs)
 
     def save_preset(self, preset: str) -> None:
-        with self._storage_lock:
+        with self._storage.lock:
             settings = self.load_settings()
             settings["selected_preset"] = preset
             self.save_settings(settings)
@@ -1065,7 +810,7 @@ class VPNManager:
         from core.routing_updater import update_throne_routing
         res = update_throne_routing(self.settings_dir, self.bin_dir, log_func=self.log)
         if res.get("success"):
-            with self._storage_lock:
+            with self._storage.lock:
                 settings = self.load_settings()
                 settings["last_rules_update"] = int(time.time())
                 self.save_settings(settings)

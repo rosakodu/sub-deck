@@ -359,16 +359,22 @@ class SubDeckApiServer:
                 import core.binaries
                 import core.singbox_config
                 import core.xray_config
+                import core.subscription_download
                 import core.parsers
                 import core.pinger
+                import core.subscription_storage
+                import core.tunnel_routing
                 import vpn_manager
                 importlib.reload(core.constants)
                 importlib.reload(core.system)
                 importlib.reload(core.binaries)
                 importlib.reload(core.singbox_config)
                 importlib.reload(core.xray_config)
+                importlib.reload(core.subscription_download)
                 importlib.reload(core.parsers)
                 importlib.reload(core.pinger)
+                importlib.reload(core.subscription_storage)
+                importlib.reload(core.tunnel_routing)
                 importlib.reload(vpn_manager)
                 self.plugin.vpn = vpn_manager.VPNManager(
                     self.plugin.vpn.plugin_dir,

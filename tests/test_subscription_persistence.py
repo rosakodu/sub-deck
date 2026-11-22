@@ -24,7 +24,6 @@ if BASE_DIR not in sys.path:
 from core.parsers import (
     parse_subscription_nodes,
     download_subscription_payload,
-    is_proxy_reachable,
     parse_endpoint,
     parse_vless_link,
     parse_node_link,
@@ -61,7 +60,7 @@ class TestSubscriptionPersistence(unittest.TestCase):
 
         # 1. Direct fails, proxy is reachable, proxy download succeeds
         with patch("urllib.request.urlopen", side_effect=Exception("Direct blocked")), \
-             patch("core.parsers.is_proxy_reachable", return_value=True), \
+             patch("core.subscription_download.is_proxy_reachable", return_value=True), \
              patch("urllib.request.build_opener") as mock_build_opener:
 
             mock_opener = MagicMock()
@@ -77,7 +76,7 @@ class TestSubscriptionPersistence(unittest.TestCase):
 
         # 2. When proxy is not reachable, returns None, None
         with patch("urllib.request.urlopen", side_effect=Exception("Direct blocked")), \
-             patch("core.parsers.is_proxy_reachable", return_value=False):
+             patch("core.subscription_download.is_proxy_reachable", return_value=False):
             content, headers = download_subscription_payload(url)
             self.assertIsNone(content)
             self.assertIsNone(headers)
