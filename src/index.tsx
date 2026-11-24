@@ -617,7 +617,7 @@ function Content() {
             </span>
             {selectedNode ? (
               <span style={{ fontSize: "11px", fontWeight: "normal", color: "#a5a5a5", marginTop: "3px", textAlign: "center" }}>
-                {connected ? `${t("tunnelStarted")}: ${selectedNode.name}` : `${t("selectedServer")}: ${selectedNode.name}`}
+                {connected ? `${t("tunnelStarted")}: ${selectedNode.name}` : t("selectedServer", { name: selectedNode.name })}
               </span>
             ) : !connected ? (
               <span style={{ fontSize: "11px", fontWeight: "normal", color: "#888", marginTop: "3px" }}>
