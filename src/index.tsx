@@ -23,7 +23,6 @@ import { NodeConfig, TranslationKeys, SubscriptionMetadata, Settings, ProtocolCa
 import { SUPPORT_COMMUNITY_URL, PASTE_BUTTON_CSS, SELECTED_BUTTON_CSS } from "./constants";
 import { translations, getTranslation } from "./i18n";
 import {
-  isFreeSubscriptionUrl,
   getDomainLabel,
   getNodeMethodLabel,
   getNodeCategory,
@@ -36,7 +35,6 @@ import {
 // Backend RPC bridge
 const getSettings = callable<[], Settings>("get_settings");
 const addSubscription = callable<[url: string], NodeConfig[]>("add_subscription");
-const addFreeSubscriptions = callable<[], NodeConfig[]>("add_free_subscriptions");
 const generateWarpNode = callable<[], any>("generate_warp_node");
 const removeSubscription = callable<[url: string], NodeConfig[]>("remove_subscription");
 const updateSubscription = callable<[url: string], NodeConfig[]>("update_subscription");
@@ -509,24 +507,6 @@ function Content() {
     }
   };
 
-  const handleAddFreeVless = async () => {
-    setLoading(true);
-    try {
-      const raw = await addFreeSubscriptions();
-      const fetchedNodes = unwrap<NodeConfig[]>(raw) || [];
-      setNodes(Array.isArray(fetchedNodes) ? fetchedNodes : []);
-      toaster.toast({
-        title: t("success"),
-        body: t("freeConfigsUpdated"),
-      });
-      await refreshSubscriptions();
-    } catch (err) {
-      toaster.toast({ title: t("error"), body: `${err}` });
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleGenerateWarp = async () => {
     setLoading(true);
     try {
@@ -562,11 +542,10 @@ function Content() {
       setNodes(nodeArray);
       await refreshSubscriptions();
 
-      const isFree = isFreeSubscriptionUrl(urlToAdd);
       const addedCount = nodeArray.filter((n) => n.subscription_url === urlToAdd).length;
       toaster.toast({
         title: t("success"),
-        body: isFree ? t("freeConfigsUpdated") : t("loadedNodesForSub", { count: addedCount }),
+        body: t("loadedNodesForSub", { count: addedCount }),
       });
       return true;
     } catch (err) {
@@ -664,12 +643,11 @@ function Content() {
       const nodeArray = Array.isArray(fetchedNodes) ? fetchedNodes : [];
 
       setNodes(nodeArray);
-      const isFree = isFreeSubscriptionUrl(urlToUpdate);
       const updatedCount = nodeArray.filter((n) => n.subscription_url === urlToUpdate).length;
 
       toaster.toast({
         title: t("success"),
-        body: isFree ? t("freeConfigsUpdated") : t("loadedNodesForSub", { count: updatedCount }),
+        body: t("loadedNodesForSub", { count: updatedCount }),
       });
     } catch (err) {
       toaster.toast({ title: t("error"), body: `${err}` });
@@ -1059,17 +1037,6 @@ function Content() {
         <ButtonItem
           layout="below"
           highlightOnFocus={false}
-          onClick={handleAddFreeVless}
-          disabled={loading}
-        >
-          {t("addFreeBtn")}
-        </ButtonItem>
-      </PanelSectionRow>
-
-      <PanelSectionRow>
-        <ButtonItem
-          layout="below"
-          highlightOnFocus={false}
           onClick={handleGenerateWarp}
           disabled={loading}
         >
@@ -1096,7 +1063,6 @@ function Content() {
               protocolFilter === "all"
                 ? subNodes
                 : subNodes.filter((node) => getNodeCategory(node) === protocolFilter);
-            const isFreeConfigs = isFreeSubscriptionUrl(url);
             const meta = subMetadata[url] || {};
             const domainLabel = meta.name ? meta.name : getDomainLabel(url, lang);
             const isExpanded =
@@ -1211,18 +1177,16 @@ function Content() {
                     )}
 
                     {/* Кнопка Обновить */}
-                    {!isFreeConfigs && (
-                      <PanelSectionRow>
-                        <ButtonItem
-                          layout="below"
-                          highlightOnFocus={false}
-                          onClick={() => handleUpdateSubscription(url)}
-                          disabled={loading}
-                        >
-                          {t("updateBtn")}
-                        </ButtonItem>
-                      </PanelSectionRow>
-                    )}
+                    <PanelSectionRow>
+                      <ButtonItem
+                        layout="below"
+                        highlightOnFocus={false}
+                        onClick={() => handleUpdateSubscription(url)}
+                        disabled={loading}
+                      >
+                        {t("updateBtn")}
+                      </ButtonItem>
+                    </PanelSectionRow>
 
                     <PanelSectionRow>
                       <ButtonItem

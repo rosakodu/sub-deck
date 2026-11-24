@@ -20,7 +20,6 @@ except ImportError:
 # Ensure plugin directory is in sys.path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from core.constants import FREE_SUBSCRIPTIONS
 from core.system import get_user_home, read_system_clipboard, get_default_gateway, get_target_uid_gid
 from core.server import SubDeckApiServer
 from tray.desktop_integration import (
@@ -169,12 +168,6 @@ class Plugin:
 
     async def add_subscription(self, url: str) -> list:
         nodes = await self.loop.run_in_executor(None, self.vpn.add_subscription, url)
-        return nodes
-
-    async def add_free_subscriptions(self) -> list:
-        nodes = await self.loop.run_in_executor(
-            None, self.vpn.add_multiple_subscriptions, FREE_SUBSCRIPTIONS
-        )
         return nodes
 
     async def remove_subscription(self, url: str) -> list:

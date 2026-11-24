@@ -34,16 +34,6 @@ You can control your VPN directly from Desktop Mode without opening Steam Big Pi
 - **Pop-up Widget (Left Click)**: Compact dark-themed control window to view latency ping, add new subscriptions with clipboard paste, and toggle desktop autostart.
 - **KDE Plasma Integration**: Creates an application entry in the desktop menu under *Internet / Utilities* and supports automatic launch on desktop login.
 
-
-## 🎁 Built-in Free Subscriptions
-
-The plugin includes a **"Free Subscriptions"** button that adds three pre-verified, automatically updated sources:
-- [igareck Subscription](https://github.com/igareck/vpn-configs-for-russia): The classic, verified configuration source for Russia.
-- [Goida VPN (AvenCores)](https://gitlab.com/avencores/goida-vpn-configs): Frequently updated VLESS configurations from the Goida VPN project.
-- [zieng2/wl Subscription](https://github.com/zieng2/wl): High-quality universal VLESS configurations from the zieng2 wl repository.
-
-*Note: For performance and speed, free subscriptions are automatically filtered to show the top 15 fastest nodes based on parallel TCP ping (user-added subscriptions have no server limit).*
-
 ## 📥 Installation
 
 ### 1. Install Decky Loader

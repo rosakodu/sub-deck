@@ -1,11 +1,4 @@
 import { NodeConfig, ProtocolCategory } from "./types";
-import { FREE_SUB_IDENTIFIERS } from "./constants";
-
-export function isFreeSubscriptionUrl(url: string): boolean {
-  if (!url) return false;
-  const lower = url.toLowerCase();
-  return FREE_SUB_IDENTIFIERS.some((id) => lower.includes(id));
-}
 
 export function getDomainLabel(url: string, lang: string): string {
   if (url.includes("igareck/vpn-configs-for-russia")) {

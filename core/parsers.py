@@ -13,8 +13,6 @@ from typing import Dict, List, Optional, Tuple, Any
 
 from core.constants import (
     SUPPORTED_SCHEMES,
-    FREE_SUBSCRIPTIONS,
-    FREE_SUBSCRIPTION_NODE_LIMIT,
     REGULAR_SUBSCRIPTION_NODE_LIMIT,
 )
 from core.pinger import select_best_nodes
@@ -23,21 +21,6 @@ from core.subscription_download import (
     get_device_hwid as get_device_hwid,
     is_proxy_reachable as is_proxy_reachable,
 )
-
-
-def is_free_subscription(url: str) -> bool:
-    """Checks whether URL belongs to pre-bundled free subscriptions."""
-    if not url:
-        return False
-    clean_url = url.strip().lower()
-    for free_url in FREE_SUBSCRIPTIONS:
-        if free_url.lower() in clean_url or clean_url in free_url.lower():
-            return True
-    return any(marker in clean_url for marker in (
-        "igareck/vpn-configs-for-russia",
-        "goida-vpn-configs",
-        "zieng2/wl"
-    ))
 
 
 def parse_endpoint(endpoint: str) -> Tuple[str, int]:
@@ -1335,7 +1318,7 @@ def parse_subscription_nodes(
 
     # Select responsive nodes (no limit if target_count is None or <= 0)
     if target_count is _DEFAULT_TARGET_COUNT:
-        limit = FREE_SUBSCRIPTION_NODE_LIMIT if is_free_subscription(url) else REGULAR_SUBSCRIPTION_NODE_LIMIT
+        limit = REGULAR_SUBSCRIPTION_NODE_LIMIT
     else:
         limit = target_count
 

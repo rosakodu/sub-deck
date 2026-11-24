@@ -1,12 +1,5 @@
 export const SUPPORT_COMMUNITY_URL = "https://vk.ru/valvesteamdeck";
 
-export const FREE_SUB_IDENTIFIERS = [
-  "igareck/vpn-configs-for-russia",
-  "avencores/goida-vpn-configs",
-  "goida-vpn-configs",
-  "zieng2/wl"
-];
-
 export const SELECTED_BUTTON_CSS = `
   /* 1. Подавление внешних рамок, теней и зазоров у контейнеров строк и полей */
   .sub-deck-root :is(

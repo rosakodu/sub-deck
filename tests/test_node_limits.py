@@ -5,19 +5,14 @@ Unit tests for node limits in core/constants.py, core/pinger.py and core/parsers
 import unittest
 from unittest.mock import patch
 
-from core.constants import (
-    FREE_SUBSCRIPTION_NODE_LIMIT,
-    REGULAR_SUBSCRIPTION_NODE_LIMIT,
-    FREE_SUBSCRIPTIONS,
-)
+from core.constants import REGULAR_SUBSCRIPTION_NODE_LIMIT
 from core.pinger import select_best_nodes
-from core.parsers import parse_subscription_nodes, is_free_subscription
+from core.parsers import parse_subscription_nodes
 
 
 class TestNodeLimits(unittest.TestCase):
     def test_constants_node_limits(self):
-        """Verifies FREE_SUBSCRIPTION_NODE_LIMIT is 15 and user subscriptions have no limit (None)."""
-        self.assertEqual(FREE_SUBSCRIPTION_NODE_LIMIT, 15)
+        """Verifies user subscriptions have no limit (None)."""
         self.assertIsNone(REGULAR_SUBSCRIPTION_NODE_LIMIT)
 
     @patch("core.pinger.check_nodes_ping")
@@ -73,8 +68,8 @@ class TestNodeLimits(unittest.TestCase):
 
     @patch("core.parsers.download_subscription_payload")
     @patch("core.pinger.check_nodes_ping")
-    def test_parse_subscription_nodes_free_vs_user(self, mock_ping, mock_download):
-        """Free subscriptions are capped at 15; user subscriptions have no limit (all nodes returned)."""
+    def test_parse_subscription_nodes_limits(self, mock_ping, mock_download):
+        """User subscriptions have no limit (all nodes returned) by default unless target_count is specified."""
         mock_ping.return_value = []  # No ping responses, triggers fallback order
         # Create 30 fake VLESS links
         lines = [
@@ -84,23 +79,16 @@ class TestNodeLimits(unittest.TestCase):
         payload = "\n".join(lines).encode("utf-8")
         mock_download.return_value = (payload, {})
 
-        # 1. Free subscription URL -> limited to 15
-        free_url = FREE_SUBSCRIPTIONS[0]
-        self.assertTrue(is_free_subscription(free_url))
-        nodes_free, _, _ = parse_subscription_nodes(free_url)
-        self.assertEqual(len(nodes_free), 15)
-
-        # 2. User subscription URL -> unlimited (all 30 nodes)
+        # 1. User subscription URL -> unlimited (all 30 nodes)
         user_url = "https://my-custom-vpn-service.org/sub/token123"
-        self.assertFalse(is_free_subscription(user_url))
         nodes_user, _, _ = parse_subscription_nodes(user_url)
         self.assertEqual(len(nodes_user), 30)
 
-        # 3. User subscription with explicit target_count
+        # 2. User subscription with explicit target_count
         nodes_custom_limit, _, _ = parse_subscription_nodes(user_url, target_count=5)
         self.assertEqual(len(nodes_custom_limit), 5)
 
-        # 4. User subscription with target_count=None or <= 0
+        # 3. User subscription with target_count=None or <= 0
         nodes_explicit_none, _, _ = parse_subscription_nodes(user_url, target_count=None)
         self.assertEqual(len(nodes_explicit_none), 30)
         nodes_explicit_zero, _, _ = parse_subscription_nodes(user_url, target_count=0)

@@ -50,13 +50,6 @@ RU_BYPASS_DOMAINS = [
     "yandex.ru", "yastatic.net", "mts.ru", "megafon.ru", "beeline.ru",
 ]
 
-# Default free subscriptions provided out of the box
-FREE_SUBSCRIPTIONS = [
-    "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/Vless-Reality-White-Lists-Rus-Mobile.txt",
-    "https://gitlab.com/avencores/goida-vpn-configs/-/raw/main/githubmirror/1.txt",
-    "https://raw.githubusercontent.com/zieng2/wl/main/vless_universal.txt",
-]
-
 # Network configuration
 DEFAULT_SOCKS_HOST = "127.0.0.1"
 DEFAULT_SOCKS_PORT = 10808
@@ -116,7 +109,6 @@ MIN_GEO_FILE_SIZE = 1_000_000  # 1 MB
 GEO_UPDATE_INTERVAL_SECONDS = 6 * 3600  # 6 hours
 
 # Node limits
-FREE_SUBSCRIPTION_NODE_LIMIT = 15
 REGULAR_SUBSCRIPTION_NODE_LIMIT = None  # None: no limit for user subscriptions
 PING_SAMPLE_MAX = 50
 PING_DEFAULT_TIMEOUT = 1.0
