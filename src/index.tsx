@@ -285,7 +285,7 @@ function Content() {
   const [trayAutostart, setTrayAutostart] = useState<boolean>(true);
   const [subMetadata, setSubMetadata] = useState<Record<string, SubscriptionMetadata>>({});
   const [pingingSubUrl, setPingingSubUrl] = useState<string | null>(null);
-  const [realDelay, setRealDelay] = useState<number | null>(null);
+  const [, setRealDelay] = useState<number | null>(null);
   const isModalOpenRef = useRef<boolean>(false);
   const isQAMVisible = useQuickAccessVisible();
   const connectBtnRef = useRef<HTMLDivElement | null>(null);
@@ -1324,7 +1324,7 @@ function Content() {
                     {connected && selectedNode && selectedNode.subscription_url === url && (
                       <PanelSectionRow>
                         <div style={{ color: "#1a9fff", fontWeight: "bold", padding: "4px 0", fontSize: "12px" }}>
-                          {t("selectedServer", { name: stripEmojis(selectedNode.name) }) + (realDelay ? ` • ${realDelay} ms` : "")}
+                          {t("selectedServer", { name: stripEmojis(selectedNode.name) })}
                         </div>
                       </PanelSectionRow>
                     )}
