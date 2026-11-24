@@ -95,7 +95,8 @@ class TunnelLifecycleTests(unittest.TestCase):
         self.manager.recover_after_resume(generation, network_ready=False)
 
         self.assertIsNone(self.manager.resume_generation())
-        self.assertIsNone(self.manager.load_settings().get("selected_node"))
+        self.assertFalse(self.manager.is_running())
+        self.assertEqual(self.manager.load_settings().get("selected_node"), self.node)
         self.assertEqual(self.spawn.call_count, 2)
 
     def test_failed_route_cleanup_survives_restart_and_is_retried(self):
@@ -116,7 +117,7 @@ class TunnelLifecycleTests(unittest.TestCase):
             self.assertFalse(self.manager.stop())
 
         settings = self.manager.load_settings()
-        self.assertIsNone(settings["selected_node"])
+        self.assertEqual(settings["selected_node"], self.node)
         self.assertEqual(settings["_routing_state"]["server_ip"], [self.node["server"]])
         self.assertFalse(settings["_routing_state"]["cleanup_tun"])
         self.manager._logger.info.assert_any_call("VPN cleanup failed: " + " ".join(delete) + ": permission denied")

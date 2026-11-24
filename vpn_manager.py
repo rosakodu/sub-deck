@@ -62,6 +62,7 @@ class VPNManager:
         self.singbox_process: Optional[subprocess.Popen] = None
         self.tun_process: Optional[subprocess.Popen] = None
         self.process = None  # Backward compatibility alias
+        self._active_node: Optional[Dict[str, Any]] = None
         self._logger = logger
         self._storage = SubscriptionStorage(settings_dir, fallback_settings_dir, self.log)
         self._connection_lock = threading.Lock()
@@ -680,6 +681,7 @@ class VPNManager:
             settings["selected_node"] = node
             settings["_routing_state"] = routing_state
             self.save_settings(settings)
+        self._active_node = node
         self.log(f"VPN connected successfully to: {node.get('name')}")
         return True
 
@@ -690,6 +692,7 @@ class VPNManager:
 
     def _stop(self) -> bool:
         self._connection_generation += 1
+        self._active_node = None
         self.log("Stopping VPN (xray/sing-box + tun2socks)...")
 
         settings = self.load_settings()
@@ -726,7 +729,7 @@ class VPNManager:
 
         with self._storage.lock:
             settings = self.load_settings()
-            settings["selected_node"] = None
+            # Preserve settings["selected_node"] so the selected/previously connected server persists across reboots
             if pending_cleanup:
                 settings["_routing_state"] = pending_cleanup
             else:
@@ -745,7 +748,7 @@ class VPNManager:
     def resume_generation(self) -> Optional[int]:
         """Identifies the active connection before waiting for the network."""
         with self._connection_lock:
-            if self.load_settings().get("selected_node"):
+            if self._active_node or self.is_running():
                 return self._connection_generation
             return None
 
@@ -754,10 +757,10 @@ class VPNManager:
         with self._connection_lock:
             if generation != self._connection_generation:
                 return
-            node = self.load_settings().get("selected_node")
+            node = self._active_node or self.load_settings().get("selected_node")
             if node and network_ready:
                 self._start(node)
-            elif node:
+            else:
                 self._stop()
 
     def is_running(self) -> bool:

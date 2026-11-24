@@ -1,4 +1,5 @@
 import asyncio
+import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
@@ -7,6 +8,7 @@ from core.tunnel_routing import TunnelRouting
 from core.server import SubDeckApiServer
 from core.xray_config import build_xray_config, build_auto_balancer_config
 from core.singbox_config import build_singbox_config
+from vpn_manager import VPNManager
 
 
 class TestCoreFixes(unittest.TestCase):
@@ -116,6 +118,27 @@ class TestServerFixes(unittest.IsolatedAsyncioTestCase):
 
         code, res = await self.server._route_request("POST", "/api/connect", {"index": "invalid"})
         self.assertEqual(code, 400)
+
+    def test_selected_node_persists_across_stop_and_stale_cleanup(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            mgr = VPNManager(tmp_dir, tmp_dir)
+            test_node = {"name": "Test Node 1", "server": "1.2.3.4", "port": 443, "type": "vless"}
+            
+            # Simulate node connection
+            with mgr._storage.lock:
+                settings = mgr.load_settings()
+                settings["selected_node"] = test_node
+                mgr.save_settings(settings)
+            mgr._active_node = test_node
+
+            # Disconnect / stop
+            mgr.stop()
+            self.assertIsNone(mgr._active_node)
+            self.assertEqual(mgr.load_settings().get("selected_node"), test_node)
+
+            # Cleanup stale on boot
+            mgr.cleanup_stale()
+            self.assertEqual(mgr.load_settings().get("selected_node"), test_node)
 
 
 if __name__ == "__main__":

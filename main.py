@@ -154,7 +154,14 @@ class Plugin:
     # ────────────────────────────────────────────────
 
     async def get_settings(self) -> dict:
-        return self.vpn.load_settings()
+        settings = self.vpn.load_settings()
+        if not settings.get("selected_node"):
+            nodes = self.vpn.get_nodes()
+            if nodes:
+                settings["selected_node"] = nodes[0]
+                with self.vpn._storage.lock:
+                    self.vpn.save_settings(settings)
+        return settings
 
     async def save_subscription_url(self, url: str) -> list:
         """Legacy method forwarding to add_subscription."""
@@ -316,7 +323,15 @@ class Plugin:
 
     async def get_selected_node(self):
         settings = self.vpn.load_settings()
-        return settings.get("selected_node")
+        node = settings.get("selected_node")
+        if not node:
+            nodes = self.vpn.get_nodes()
+            if nodes:
+                node = nodes[0]
+                with self.vpn._storage.lock:
+                    settings["selected_node"] = node
+                    self.vpn.save_settings(settings)
+        return node
 
     async def get_clipboard(self) -> str:
         """Reads system clipboard (X11 / Gamescope and KDE Klipper)."""

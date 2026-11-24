@@ -42,15 +42,26 @@ test -f "$TMP_DIR/defaults/bin/sing-box"
 chmod 755 "$TMP_DIR/defaults/bin/sing-box"
 
 SSH_TARGET="${DECK_USER}@${DECK_IP}"
+DECK_PASS="${DECK_PASS:-0451}"
+SSH_CMD="ssh -o StrictHostKeyChecking=no"
+if command -v sshpass >/dev/null 2>&1; then
+  SSH_PREFIX="sshpass -p '$DECK_PASS'"
+else
+  SSH_PREFIX=""
+fi
 
 echo "==> 3. Подготовка прав на Steam Deck..."
-ssh -t -o StrictHostKeyChecking=yes "$SSH_TARGET" \
-  "sudo chown -R deck:deck '$DEST' && sudo chmod -R u+rwX '$DEST'"
+eval $SSH_PREFIX $SSH_CMD "$SSH_TARGET" \
+  "\"echo '$DECK_PASS' | sudo -S chown -R deck:deck '$DEST' && echo '$DECK_PASS' | sudo -S chmod -R u+rwX '$DEST'\""
 
 echo "==> 4. Копирование файлов на Steam Deck..."
-scp -r -o StrictHostKeyChecking=yes "$TMP_DIR"/* "$SSH_TARGET:$DEST/"
+if [[ -n "$SSH_PREFIX" ]]; then
+  sshpass -p "$DECK_PASS" scp -r -o StrictHostKeyChecking=no "$TMP_DIR"/* "$SSH_TARGET:$DEST/"
+else
+  scp -r -o StrictHostKeyChecking=no "$TMP_DIR"/* "$SSH_TARGET:$DEST/"
+fi
 
 echo "==> 5. Перезапуск Decky Loader (plugin_loader.service)..."
-ssh -t -o StrictHostKeyChecking=yes "$SSH_TARGET" "sudo systemctl restart plugin_loader.service"
+eval $SSH_PREFIX $SSH_CMD "$SSH_TARGET" "\"echo '$DECK_PASS' | sudo -S systemctl restart plugin_loader.service\""
 
 echo "==> Успешно деплоировано на Steam Deck (${DECK_IP})!"

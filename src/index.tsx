@@ -237,9 +237,9 @@ function Content() {
 
         const rawSettings = await getSettings();
         const settings = unwrap<Settings>(rawSettings);
+        let initialSelected = settings?.selected_node || null;
         if (settings && mounted) {
           setSubscriptions(settings.subscriptions || []);
-          setSelectedNode(settings.selected_node || null);
           if (settings.selected_preset) {
             setPreset(settings.selected_preset);
           }
@@ -250,8 +250,13 @@ function Content() {
 
         const rawNodes = await getNodes();
         const cachedNodes = unwrap<NodeConfig[]>(rawNodes) || [];
+        const validNodes = Array.isArray(cachedNodes) ? cachedNodes : [];
+        if (!initialSelected && validNodes.length > 0) {
+          initialSelected = validNodes[0];
+        }
         if (mounted) {
-          setNodes(Array.isArray(cachedNodes) ? cachedNodes : []);
+          setNodes(validNodes);
+          setSelectedNode(initialSelected);
         }
 
         const rawRunning = await isConnected();
@@ -535,17 +540,22 @@ function Content() {
         setLoading(false);
       }
     } else {
-      if (!selectedNode) {
+      let targetNode = selectedNode;
+      if (!targetNode && nodes.length > 0) {
+        targetNode = nodes[0];
+        setSelectedNode(targetNode);
+      }
+      if (!targetNode) {
         toaster.toast({ title: t("toastWarning"), body: t("noNodeSelected") });
         return;
       }
       setLoading(true);
       try {
-        const rawSuccess = await connectNode(selectedNode);
+        const rawSuccess = await connectNode(targetNode);
         const success = unwrap<boolean>(rawSuccess);
         if (success) {
           setConnected(true);
-          toaster.toast({ title: t("tunnelStarted"), body: t("tunnelStartedBody", { name: selectedNode.name }) });
+          toaster.toast({ title: t("tunnelStarted"), body: t("tunnelStartedBody", { name: targetNode.name }) });
         } else {
           toaster.toast({ title: t("error"), body: t("tunnelStartFailed") });
           setConnected(false);
