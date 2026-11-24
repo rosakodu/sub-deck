@@ -669,17 +669,6 @@ function Content() {
       pingColor = "#faad14"; // amber/yellow (111-180ms)
     }
 
-    const flagPart = node.country_flag ? `${node.country_flag} ` : "";
-    const pingPart = ping === 0 ? "<1 ms" : `${ping} ms`;
-    const downPart =
-      typeof node.speed_down === "number" && Number.isFinite(node.speed_down) && node.speed_down >= 0
-        ? ` ↓${node.speed_down.toFixed(2)}Mbps`
-        : "";
-    const upPart =
-      typeof node.speed_up === "number" && Number.isFinite(node.speed_up) && node.speed_up >= 0
-        ? ` ↑${node.speed_up.toFixed(2)}Mbps`
-        : "";
-
     return (
       <div
         style={{
@@ -711,7 +700,7 @@ function Content() {
             lineHeight: "14px",
           }}
         >
-          {`${flagPart}${pingPart}${downPart}${upPart}`}
+          {ping === 0 ? "<1 ms" : `${ping} ms`}
         </span>
       </div>
     );
@@ -1310,10 +1299,9 @@ function Content() {
                                     className="sub-deck-node-ping"
                                     style={{
                                       display: "flex",
-                                      justifyContent: "flex-start",
+                                      justifyContent: "center",
                                       alignItems: "center",
                                       marginTop: "3px",
-                                      paddingLeft: "2px",
                                     }}
                                   >
                                     {pingBadge}
