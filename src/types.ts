@@ -89,7 +89,8 @@ export type TranslationKeys =
   | "protocolFilterTls"
   | "protocolFilterObfs"
   | "protocolFilterUdp"
-  | "noNodesForFilter";
+  | "noNodesForFilter"
+  | "autoBalancerBtn";
 
 export type ProtocolCategory = "all" | "tls" | "obfs" | "udp";
 

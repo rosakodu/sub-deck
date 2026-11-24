@@ -210,6 +210,47 @@ function Content() {
     return map;
   }, [nodes]);
 
+  const autoNode: NodeConfig = useMemo(() => {
+    const existing = nodes.find(
+      (n) => n.type === "auto_balancer" || n.server === "auto" || n.name === "⚡ Авто-выбор лучшего"
+    );
+    if (existing) {
+      return {
+        ...existing,
+        uuid: existing.uuid || "auto-balancer",
+        security: existing.security || "",
+        sni: existing.sni || "",
+        pbk: existing.pbk || "",
+        sid: existing.sid || "",
+        flow: existing.flow || "",
+        fp: existing.fp || "",
+        name: t("autoBalancerBtn"),
+      };
+    }
+    return {
+      name: t("autoBalancerBtn"),
+      server: "auto",
+      port: 0,
+      type: "auto_balancer",
+      security: "",
+      sni: "",
+      pbk: "",
+      sid: "",
+      flow: "",
+      fp: "",
+      uuid: "auto-balancer",
+    };
+  }, [nodes, t]);
+
+  const isAutoSelected = Boolean(
+    selectedNode &&
+      (selectedNode.type === "auto_balancer" ||
+        selectedNode.server === "auto" ||
+        selectedNode.name === autoNode.name ||
+        selectedNode.name === "⚡ Авто-выбор лучшего" ||
+        selectedNode.name === t("autoBalancerBtn"))
+  );
+
   // Initialization lifecycle
   useEffect(() => {
     let mounted = true;
@@ -480,8 +521,13 @@ function Content() {
     }
   };
 
-  const handleNodeClick = async (node: NodeConfig) => {
-    const isCurrentActive = selectedNode && selectedNode.name === node.name && connected;
+  const handleSelectNode = async (node: NodeConfig) => {
+    const isCurrentActive =
+      selectedNode &&
+      (selectedNode.name === node.name ||
+        (selectedNode.type === "auto_balancer" && node.type === "auto_balancer") ||
+        (selectedNode.server === "auto" && node.server === "auto")) &&
+      connected;
 
     if (isCurrentActive) {
       setLoading(true);
@@ -617,7 +663,9 @@ function Content() {
             </span>
             {selectedNode ? (
               <span style={{ fontSize: "11px", fontWeight: "normal", color: "#a5a5a5", marginTop: "3px", textAlign: "center" }}>
-                {connected ? `${t("tunnelStarted")}: ${selectedNode.name}` : t("selectedServer", { name: selectedNode.name })}
+                {connected
+                  ? `${t("tunnelStarted")}: ${isAutoSelected ? t("autoBalancerBtn") : selectedNode.name}`
+                  : t("selectedServer", { name: isAutoSelected ? t("autoBalancerBtn") : selectedNode.name })}
               </span>
             ) : !connected ? (
               <span style={{ fontSize: "11px", fontWeight: "normal", color: "#888", marginTop: "3px" }}>
@@ -762,6 +810,48 @@ function Content() {
         )}
       </PanelSection>
 
+      {/* Кнопка выбора авто-балансировщика */}
+      <PanelSectionRow>
+        <div style={{ position: "relative", width: "100%" }}>
+          <ButtonItem
+            layout="below"
+            onClick={() => handleSelectNode(autoNode)}
+            disabled={loading}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                width: "100%",
+                fontWeight: isAutoSelected ? "bold" : "normal",
+                color: isAutoSelected ? "#1a9fff" : "inherit",
+              }}
+            >
+              <span>{t("autoBalancerBtn")}</span>
+              {isAutoSelected && (
+                <span style={{ color: "#1a9fff", fontWeight: "bold", fontSize: "14px" }}>✔</span>
+              )}
+            </div>
+          </ButtonItem>
+          {isAutoSelected && (
+            <div
+              style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                border: "1.5px solid #1a9fff",
+                borderRadius: "4px",
+                pointerEvents: "none",
+                backgroundColor: "rgba(26, 159, 255, 0.1)",
+              }}
+            />
+          )}
+        </div>
+      </PanelSectionRow>
+
       {/* Кнопка добавления подписки через модальное окно */}
       <PanelSectionRow>
         <ButtonItem
@@ -889,7 +979,7 @@ function Content() {
                               <div style={{ position: "relative", width: "100%" }}>
                                 <ButtonItem
                                   layout="below"
-                                  onClick={() => handleNodeClick(node)}
+                                  onClick={() => handleSelectNode(node)}
                                 >
                                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
                                     <div style={{ display: "flex", alignItems: "center", gap: "8px", textAlign: "left" }}>
