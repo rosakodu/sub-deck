@@ -349,6 +349,11 @@ class SubDeckApiServer:
             )
             return 200, {"success": bool(delay is not None and delay > 0), "delay_ms": delay}
 
+        # ── POST /api/auto_select_best ──
+        if method == "POST" and path in ("/api/auto_select_best", "/api/auto_select"):
+            res = await self.plugin.auto_select_best_node()
+            return 200, res
+
         # ── GET /api/desktop/status ──
         if method == "GET" and path == "/api/desktop/status":
             status = await self.plugin.get_desktop_status()

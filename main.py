@@ -310,6 +310,77 @@ class Plugin:
         )
         return {"success": delay is not None, "delay_ms": int(delay) if delay else None}
 
+    async def auto_select_best_node(self) -> dict:
+        """
+        Finds the best responsive node with lowest latency among available working nodes,
+        configures the leastPing auto-balancer or connects to it,
+        and returns the chosen node details (name, ping, success).
+        """
+        from core.pinger import find_best_node
+        from core.system import clean_node_name
+
+        nodes = self.vpn.load_nodes()
+        candidate_nodes = [n for n in nodes if n.get("type") != "auto_balancer"]
+        if not candidate_nodes:
+            return {"success": False, "error": "No nodes available"}
+
+        best_node = await self.loop.run_in_executor(
+            None, lambda: find_best_node(candidate_nodes, timeout=1.5, log_func=self.vpn.log)
+        )
+        if not best_node:
+            best_node = candidate_nodes[0]
+
+        best_ping = best_node.get("ping")
+        # Update cached ping in vpn if ping was measured
+        if best_ping:
+            try:
+                for n in candidate_nodes:
+                    if n.get("server") == best_node.get("server") and n.get("port") == best_node.get("port"):
+                        n["ping"] = best_ping
+                await self.loop.run_in_executor(
+                    None, lambda: self.vpn.save_nodes(candidate_nodes, force=True)
+                )
+            except Exception as e:
+                decky.logger.warning(f"Failed to update ping cache: {e}")
+
+        # Construct auto balancer node
+        auto_node = {
+            "type": "auto_balancer",
+            "name": "Авто-выбор лучшего сервера",
+            "server": "auto",
+            "port": 0,
+            "ping": best_ping or 1,
+            "uuid": "auto-balancer",
+            "best_node": best_node
+        }
+
+        # Check if best_node is a Sing-box node or Xray node
+        is_singbox_best = best_node.get("type") in ("awg", "hysteria2", "hy2", "tuic", "wireguard", "warp")
+
+        # Check if candidate_nodes have any Xray-compatible nodes
+        xray_candidates = [
+            n for n in candidate_nodes
+            if n.get("type") in ("vless", "vmess", "trojan", "shadowsocks", "balancer")
+        ]
+
+        if not is_singbox_best and xray_candidates:
+            target_to_start = auto_node
+        else:
+            # If best node is Sing-box (AWG / Hysteria 2 / WARP) or no Xray nodes exist, connect to best_node
+            target_to_start = best_node
+
+        success = await self.loop.run_in_executor(None, self.vpn.start, target_to_start)
+        clean_name = clean_node_name(best_node.get("name", ""))
+        decky.logger.info(f"auto_select_best_node selected '{clean_name}' (ping: {best_ping}ms): success={success}")
+
+        return {
+            "success": bool(success),
+            "node_name": clean_name,
+            "ping": int(best_ping) if best_ping else None,
+            "server": best_node.get("server"),
+            "best_node": best_node,
+        }
+
     async def connect_node(self, node: dict) -> bool:
         success = await self.loop.run_in_executor(None, self.vpn.start, node)
         decky.logger.info(f"connect_node '{node.get('name')}': success={success}")

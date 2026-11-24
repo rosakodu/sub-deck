@@ -23,7 +23,9 @@ export const translations: Record<string, Record<TranslationKeys, string>> = {
     disconnectVpn: "Disconnect VPN",
     noNodeSelected: "No server selected. Please select one from the list.",
     toastWarning: "Warning",
-    toastSelectedNode: "Server selected: {name}",
+    toastSelectedNode: "Selected server: {name}",
+    checkPing: "Check Ping",
+    measuringPing: "Measuring Ping...",
     logButton: "LOG",
     subscriptionsTitle: "My Subscriptions",
     noSubscriptions: "No subscriptions added",
@@ -57,7 +59,7 @@ export const translations: Record<string, Record<TranslationKeys, string>> = {
     protocolFilterObfs: "Obfuscation / Random (AWG / Warp)",
     protocolFilterUdp: "Fast UDP (Hysteria 2 / TUIC)",
     noNodesForFilter: "No servers found for this protocol filter",
-    autoBalancerBtn: "⚡ Auto-Select Best Server"
+    autoBalancerBtn: "Auto-Select Best Server"
   },
   russian: {
     title: "Управление VLESS",
@@ -81,7 +83,9 @@ export const translations: Record<string, Record<TranslationKeys, string>> = {
     disconnectVpn: "Отключить VPN",
     noNodeSelected: "Нет ранее подключенной ноды. Выберите ноду из списка.",
     toastWarning: "Внимание",
-    toastSelectedNode: "Сервер выбран: {name}",
+    toastSelectedNode: "Выбран сервер: {name}",
+    checkPing: "Проверить пинг",
+    measuringPing: "Измерение пинга...",
     logButton: "LOG",
     subscriptionsTitle: "Мои подписки",
     noSubscriptions: "Нет добавленных подписок",
@@ -115,7 +119,7 @@ export const translations: Record<string, Record<TranslationKeys, string>> = {
     protocolFilterObfs: "Обфускация / Random (AWG / Warp)",
     protocolFilterUdp: "Скоростной UDP (Hysteria 2 / TUIC)",
     noNodesForFilter: "Нет серверов для выбранного протокола",
-    autoBalancerBtn: "⚡ Авто-выбор лучшего сервера"
+    autoBalancerBtn: "Авто-выбор лучшего сервера"
   },
   schinese: {
     title: "VLESS 管理",
@@ -140,6 +144,8 @@ export const translations: Record<string, Record<TranslationKeys, string>> = {
     noNodeSelected: "没有选择节点。请从列表中选择。",
     toastWarning: "警告",
     toastSelectedNode: "已选择服务器: {name}",
+    checkPing: "测试延迟",
+    measuringPing: "正在测试延迟...",
     logButton: "LOG",
     subscriptionsTitle: "我的订阅",
     noSubscriptions: "无订阅链接",
@@ -173,7 +179,7 @@ export const translations: Record<string, Record<TranslationKeys, string>> = {
     protocolFilterObfs: "混淆 / 随机流量 (AWG / Warp)",
     protocolFilterUdp: "高速 UDP (Hysteria 2 / TUIC)",
     noNodesForFilter: "未找到符合所选协议的服务器",
-    autoBalancerBtn: "⚡ 自动选择最佳服务器"
+    autoBalancerBtn: "自动选择最佳服务器"
   },
   tchinese: {
     title: "VLESS 管理",
@@ -198,6 +204,8 @@ export const translations: Record<string, Record<TranslationKeys, string>> = {
     noNodeSelected: "没有选择节点。请从列表中选择。",
     toastWarning: "警告",
     toastSelectedNode: "已選擇伺服器: {name}",
+    checkPing: "測試延遲",
+    measuringPing: "正在測試延遲...",
     logButton: "LOG",
     subscriptionsTitle: "我的訂閱",
     noSubscriptions: "無訂閱連結",
@@ -231,7 +239,7 @@ export const translations: Record<string, Record<TranslationKeys, string>> = {
     protocolFilterObfs: "混淆 / 隨機流量 (AWG / Warp)",
     protocolFilterUdp: "高速 UDP (Hysteria 2 / TUIC)",
     noNodesForFilter: "未找到符合所選協議的伺服器",
-    autoBalancerBtn: "⚡ 自動選擇最佳伺服器"
+    autoBalancerBtn: "自動選擇最佳伺服器"
   },
   arabic: {
     title: "إدارة VLESS",
@@ -256,6 +264,8 @@ export const translations: Record<string, Record<TranslationKeys, string>> = {
     noNodeSelected: "لم يتم تحديد خادم. يرجى الاختيار من القائمة.",
     toastWarning: "تحذير",
     toastSelectedNode: "تم اختيار الخادم: {name}",
+    checkPing: "فحص البينج",
+    measuringPing: "جاري فحص البينج...",
     logButton: "LOG",
     subscriptionsTitle: "اشتراكاتي",
     noSubscriptions: "لا توجد اشتراكات مضافة",
@@ -289,7 +299,7 @@ export const translations: Record<string, Record<TranslationKeys, string>> = {
     protocolFilterObfs: "تشويش / حركة عشوائية (AWG / Warp)",
     protocolFilterUdp: "UDP سريع (Hysteria 2 / TUIC)",
     noNodesForFilter: "لم يتم العثور على خوادم لهذا البروتوكول",
-    autoBalancerBtn: "⚡ الاختيار التلقائي لأفضل خادم"
+    autoBalancerBtn: "الاختيار التلقائي لأفضل خادم"
   },
   persian: {
     title: "مدیریت VLESS",
@@ -314,6 +324,8 @@ export const translations: Record<string, Record<TranslationKeys, string>> = {
     noNodeSelected: "هیچ سروری انتخاب نشده است. لطفاً از لیست انتخاب کنید.",
     toastWarning: "هشدار",
     toastSelectedNode: "سرور انتخاب شد: {name}",
+    checkPing: "بررسی پینگ",
+    measuringPing: "در حال بررسی پینگ...",
     logButton: "LOG",
     subscriptionsTitle: "اشتراک‌های من",
     noSubscriptions: "هیچ اشتراکی اضافه نشده است",
@@ -347,7 +359,7 @@ export const translations: Record<string, Record<TranslationKeys, string>> = {
     protocolFilterObfs: "مبهم‌سازی / تصادفی (AWG / Warp)",
     protocolFilterUdp: "UDP سریع (Hysteria 2 / TUIC)",
     noNodesForFilter: "هیچ سروری برای این فیلتر پروتکل پیدا نشد",
-    autoBalancerBtn: "⚡ انتخاب خودکار بهترین سرور"
+    autoBalancerBtn: "انتخاب خودکار بهترین سرور"
   },
   turkish: {
     title: "VPN Yapılandırmaları",
@@ -372,6 +384,8 @@ export const translations: Record<string, Record<TranslationKeys, string>> = {
     noNodeSelected: "Sunucu seçilmedi. Lütfen listeden bir tane seçin.",
     toastWarning: "Uyarı",
     toastSelectedNode: "Sunucu seçildi: {name}",
+    checkPing: "Ping Kontrol Et",
+    measuringPing: "Ping Ölçülüyor...",
     logButton: "LOG",
     subscriptionsTitle: "Aboneliklerim",
     noSubscriptions: "Eklenmiş abonelik yok",
@@ -405,7 +419,7 @@ export const translations: Record<string, Record<TranslationKeys, string>> = {
     protocolFilterObfs: "Gizleme / Rastgele (AWG / Warp)",
     protocolFilterUdp: "Hızlı UDP (Hysteria 2 / TUIC)",
     noNodesForFilter: "Bu protokol filtresi için sunucu bulunamadı",
-    autoBalancerBtn: "⚡ En İyi Sunucuyu Otomatik Seç"
+    autoBalancerBtn: "En İyi Sunucuyu Otomatik Seç"
   }
 };
 

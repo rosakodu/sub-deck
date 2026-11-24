@@ -407,7 +407,7 @@ def build_auto_balancer_config(
         },
         "observatory": {
             "probeUrl": "http://www.gstatic.com/generate_204",
-            "probeInterval": "30s",
+            "probeInterval": "15s",
             "subjectSelector": ["proxy-"]
         }
     }

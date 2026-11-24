@@ -14,6 +14,7 @@ export interface NodeConfig {
   subscription_url?: string;
   transport?: string;
   method?: string;
+  best_node?: NodeConfig;
 }
 
 export interface SubscriptionMetadata {
@@ -90,7 +91,9 @@ export type TranslationKeys =
   | "protocolFilterObfs"
   | "protocolFilterUdp"
   | "noNodesForFilter"
-  | "autoBalancerBtn";
+  | "autoBalancerBtn"
+  | "checkPing"
+  | "measuringPing";
 
 export type ProtocolCategory = "all" | "tls" | "obfs" | "udp";
 

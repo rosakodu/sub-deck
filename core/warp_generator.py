@@ -71,7 +71,7 @@ def _build_amnezia_nodes(
     # Node 1: Mini QUIC Initial TLS 1.3 ClientHello masking
     quic_node = {
         "type": "awg",
-        "name": "🛡️ Warp Generation (QUIC)",
+        "name": "Warp Generation (QUIC)",
         "server": chosen_ips[0],
         "port": chosen_ports[0],
         "private_key": priv_key,
@@ -98,7 +98,7 @@ def _build_amnezia_nodes(
     # Node 2: AWG 2.0 Handshake Obfuscation
     awg2_node = {
         "type": "awg",
-        "name": "🛡️ Warp Generation (AWG 2.0)",
+        "name": "Warp Generation (AWG 2.0)",
         "server": chosen_ips[1] if len(chosen_ips) > 1 else chosen_ips[0],
         "port": chosen_ports[1] if len(chosen_ports) > 1 else chosen_ports[0],
         "private_key": priv_key,
@@ -125,7 +125,7 @@ def _build_amnezia_nodes(
     # Node 3: SIP VoIP Header Masking
     sip_node = {
         "type": "awg",
-        "name": "🛡️ Warp Generation (SIP)",
+        "name": "Warp Generation (SIP)",
         "server": chosen_ips[2] if len(chosen_ips) > 2 else chosen_ips[0],
         "port": chosen_ports[2] if len(chosen_ports) > 2 else chosen_ports[0],
         "private_key": priv_key,

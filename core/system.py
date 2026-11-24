@@ -287,14 +287,19 @@ _BALANCER_WORD_RE = re.compile(
     r'\s+(автобалансер|авто-балансер)',
     re.IGNORECASE
 )
+_EMOJI_RE = re.compile(
+    r'[\U00010000-\U0010ffff\u2600-\u27bf\u2300-\u23ff\u2b50-\u2b55\u203c-\u2049\u25aa-\u25fe\u00a9\u00ae\u20e3\u2122\u2139\ufe00-\ufe0f\u200d]'
+)
 
 
 def clean_node_name(name: str) -> str:
-    """Removes auto-balancer markers and extra whitespace from node names."""
+    """Removes auto-balancer markers, emojis, and extra whitespace from node names."""
     if not name:
         return ""
     clean = _BALANCER_BRACKET_RE.sub("", name)
-    clean = _BALANCER_WORD_RE.sub("", clean).strip()
+    clean = _BALANCER_WORD_RE.sub("", clean)
+    clean = _EMOJI_RE.sub("", clean)
+    clean = re.sub(r'\s+', ' ', clean).strip()
     return clean or name
 
 

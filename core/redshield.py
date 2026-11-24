@@ -12,19 +12,9 @@ from typing import List, Dict, Any, Optional
 from core.parsers import parse_wireguard_conf, parse_vless_link
 
 REDSHIELD_SUB_KEY = "redshield_vpn"
-REDSHIELD_SUB_NAME = "🛡️ Red Shield VPN"
+REDSHIELD_SUB_NAME = "Red Shield VPN"
 
-FLAG_MAP = {
-    "LT": "🇱🇹", "LV": "🇱🇻", "FIN": "🇫🇮", "AMS": "🇳🇱", "STM": "🇸🇪",
-    "PRA": "🇨🇿", "FR": "🇫🇷", "IT": "🇮🇹", "FRA": "🇩🇪", "PO": "🇵🇱",
-    "AU": "🇦🇹", "BU": "🇭🇺", "RS": "🇷🇸", "SW": "🇨🇭", "LON": "🇬🇧",
-    "TR": "🇹🇷", "CY": "🇨🇾", "ES": "🇪🇸", "IL": "🇮🇱", "AG": "🇦🇷",
-    "PT": "🇵🇹", "AE": "🇦🇪", "CA": "🇨🇦", "NY": "🇺🇸", "HK": "🇭🇰",
-    "JP": "🇯🇵", "TH": "🇹🇭", "LA": "🇺🇸", "BR": "🇧🇷", "SG": "🇸🇬",
-    "RU": "🇷🇺", "GE": "🇬🇪", "KZ": "🇰🇿", "RB": "🇧🇾", "UA": "🇺🇦",
-    "AM": "🇦🇲", "UZ": "🇺🇿",
-    "PZ-WL1": "🏴‍☠️", "PZ-WL2": "🏴‍☠️", "PZ-WL3": "🏴‍☠️", "PZ-WL5": "🏴‍☠️",
-}
+FLAG_MAP = {}
 
 
 def extract_redshield_nodes(source_dir: str = "/tmp/redshield") -> List[Dict[str, Any]]:
@@ -57,7 +47,6 @@ def extract_redshield_nodes(source_dir: str = "/tmp/redshield") -> List[Dict[str
     if awg_tpl:
         for loc in locations:
             code = loc.get("code")
-            flag = FLAG_MAP.get(code, "🌐")
             name_ru = loc.get("nameRu") or loc.get("name", code)
             hosts = loc.get("hosts")
             awg_ip = loc.get("awgIp") or hosts
@@ -67,7 +56,7 @@ def extract_redshield_nodes(source_dir: str = "/tmp/redshield") -> List[Dict[str
                 if loc.get("protoPriorities") == "awg" or loc.get("shadowAwg") == 1:
                     for p in (3479, 55777):
                         conf = awg_tpl.replace("{ENDPOINT}", f"{awg_ip}:{p}")
-                        node_name = f"{flag} RedShield | {name_ru} (AWG:{p})"
+                        node_name = f"RedShield | {name_ru} (AWG:{p})"
                         node = parse_wireguard_conf(conf, name=node_name)
                         if node:
                             node["subscription_url"] = REDSHIELD_SUB_KEY
@@ -76,7 +65,7 @@ def extract_redshield_nodes(source_dir: str = "/tmp/redshield") -> List[Dict[str
                 forced_port = loc.get("forcedAwgPort")
                 port = int(forced_port) if forced_port else rec_awg_port
                 conf = awg_tpl.replace("{ENDPOINT}", f"{awg_ip}:{port}")
-                node_name = f"{flag} RedShield | {name_ru} (AWG)"
+                node_name = f"RedShield | {name_ru} (AWG)"
                 node = parse_wireguard_conf(conf, name=node_name)
                 if node:
                     node["subscription_url"] = REDSHIELD_SUB_KEY
@@ -85,13 +74,12 @@ def extract_redshield_nodes(source_dir: str = "/tmp/redshield") -> List[Dict[str
     # 4. Extract VLESS Reality nodes
     for loc in locations:
         code = loc.get("code")
-        flag = FLAG_MAP.get(code, "🌐")
         name_ru = loc.get("nameRu") or loc.get("name", code)
         xray_ip = loc.get("xrayIp") or (loc.get("hosts") if loc.get("xraySni") or str(code).startswith("PZ-WL") else None)
         xray_port = loc.get("xrayPort") or 443
         xray_sni = loc.get("xraySni") or "node44.lmdscdn.ru"
         if xray_ip:
-            node_name = f"{flag} RedShield | {name_ru} (VLESS)"
+            node_name = f"RedShield | {name_ru} (VLESS)"
             link = (
                 f"vless://658de489-4568-4e55-b4a6-cfb9169e7198@{xray_ip}:{xray_port}"
                 f"?security=reality&encryption=none&pbk=PVlnR_I9tZ8hKhOHW6ySpSofhsaShcBQ_JV2-0TePVA"

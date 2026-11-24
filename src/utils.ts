@@ -36,10 +36,10 @@ export function getDomainLabel(url: string, lang: string): string {
     return "zieng2 Subscription";
   }
   if (url === "redshield_vpn") {
-    return "🛡️ Red Shield VPN";
+    return "Red Shield VPN";
   }
   if (url === "amnezia_warp" || url === "cloudflare_warp") {
-    return "🛡️ Warp Generation";
+    return "Warp Generation";
   }
   try {
     const parsed = new URL(url);
@@ -178,4 +178,14 @@ export function formatExpiry(expireTimestamp?: number, lang?: string): string {
   const hours = Math.floor(diff / 3600);
   return isRu ? `Осталось ${hours} ч.` : `${hours} hrs left`;
 }
+
+// Regex matching all Unicode emoji, pictographs, flags (regional indicator pairs), dingbats, symbols, and variation selectors
+const EMOJI_REGEX = /[\u{1F000}-\u{1FAFF}\u{1F1E6}-\u{1F1FF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F300}-\u{1F5FF}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6FF}\u{200D}\u{20E3}\u{2300}-\u{23FF}\u{2B50}\u{2B55}\u{2934}\u{2935}\u{25AA}\u{25AB}\u{25FE}\u{25FD}\u{25FB}\u{25FC}\u{25B6}\u{25C0}\u{E0020}-\u{E007F}]/gu;
+
+export function stripEmojis(str?: string): string {
+  if (!str) return "";
+  const cleaned = str.replace(EMOJI_REGEX, "").replace(/\s+/g, " ").trim();
+  return cleaned || str;
+}
+
 

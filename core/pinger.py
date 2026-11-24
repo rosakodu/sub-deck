@@ -202,3 +202,60 @@ def ping_all_nodes(nodes: List[Dict[str, Any]], max_workers: int = 25, timeout: 
                 node_copies[idx]["ping"] = None
 
     return node_copies
+
+
+def find_best_node(
+    nodes: List[Dict[str, Any]],
+    timeout: float = 1.2,
+    max_workers: int = 50,
+    log_func=None
+) -> Optional[Dict[str, Any]]:
+    """
+    Finds the single best responsive node with the lowest latency among available working nodes.
+    First runs a fast parallel handshake ping across candidate nodes.
+    If responsive nodes are found, returns the one with lowest ping.
+    If none respond to ping, falls back to existing cached ping > 0.
+    If none, returns the first available node.
+    """
+    candidate_nodes = [n for n in nodes if n.get("type") != "auto_balancer"]
+    if not candidate_nodes:
+        return None
+
+    # Filter candidates with host and port
+    pingable = [n for n in candidate_nodes if n.get("server") and n.get("port")]
+
+    # Prioritize nodes with valid positive cached pings first
+    pingable.sort(key=lambda x: (0 if isinstance(x.get("ping"), (int, float)) and x.get("ping") > 0 else 1, x.get("ping") or 9999))
+
+    effective_workers = min(len(pingable), max_workers) if pingable else max_workers
+    if log_func:
+        log_func(f"find_best_node: testing latency for {len(pingable)} candidate nodes (timeout={timeout}s, workers={effective_workers})...")
+
+    alive = []
+    if pingable:
+        alive = check_nodes_ping(pingable, max_workers=effective_workers, timeout=timeout)
+
+    if alive:
+        best = alive[0]
+        if log_func:
+            log_func(f"find_best_node: best responsive node is '{best.get('name')}' with ping {best.get('ping')}ms")
+        return best
+
+    # Fallback to existing cached pings
+    cached_alive = [
+        n for n in candidate_nodes
+        if isinstance(n.get("ping"), (int, float)) and n.get("ping") > 0
+    ]
+    if cached_alive:
+        cached_alive.sort(key=lambda x: x["ping"])
+        best = cached_alive[0]
+        if log_func:
+            log_func(f"find_best_node: fallback to cached ping: '{best.get('name')}' ({best.get('ping')}ms)")
+        return best
+
+    # Fallback to first candidate node
+    best = candidate_nodes[0]
+    if log_func:
+        log_func(f"find_best_node: no ping response, selected first candidate '{best.get('name')}'")
+    return best
+

@@ -84,7 +84,17 @@ class VPNManager:
         return self._storage.settings_read_failed
 
     def load_settings(self) -> Dict[str, Any]:
-        return self._storage.load_settings()
+        settings = self._storage.load_settings()
+        if isinstance(settings, dict):
+            node = settings.get("selected_node")
+            if isinstance(node, dict) and "name" in node:
+                node["name"] = clean_node_name(node["name"])
+            sub_meta = settings.get("subscription_metadata")
+            if isinstance(sub_meta, dict):
+                for meta in sub_meta.values():
+                    if isinstance(meta, dict) and "name" in meta:
+                        meta["name"] = clean_node_name(meta["name"])
+        return settings
 
     def save_settings(self, settings: Dict[str, Any]) -> None:
         self._storage.save_settings(settings)
@@ -103,12 +113,12 @@ class VPNManager:
             # Separate WARP/Amnezia WARP nodes and other nodes to put WARP right at the top
             warp_nodes = [
                 n for n in nodes
-                if n.get("type") in ("warp", "wireguard")
+                if n.get("type") in ("warp", "wireguard", "awg")
                 or n.get("subscription_url") in ("cloudflare_warp", "amnezia_warp")
             ]
             other_nodes = [
                 n for n in nodes
-                if n.get("type") not in ("warp", "wireguard")
+                if n.get("type") not in ("warp", "wireguard", "awg")
                 and n.get("subscription_url") not in ("cloudflare_warp", "amnezia_warp")
             ]
             ordered_nodes = warp_nodes + other_nodes
@@ -116,7 +126,7 @@ class VPNManager:
             if len(ordered_nodes) > 1 and not any(n.get("type") == "auto_balancer" for n in ordered_nodes):
                 auto_node = {
                     "type": "auto_balancer",
-                    "name": "⚡ Авто-выбор лучшего",
+                    "name": "Авто-выбор лучшего сервера",
                     "server": "auto",
                     "port": 0,
                     "ping": 1
@@ -131,7 +141,13 @@ class VPNManager:
     def save_nodes(self, nodes: List[Dict[str, Any]], force: bool = False) -> None:
         """Persists nodes list to disk atomically to both primary and fallback directories with fsync and .bak backup. Never overwrites with empty unless force=True."""
         with self._storage.lock:
-            clean_nodes = [n for n in nodes if n.get("type") != "auto_balancer"]
+            clean_nodes = []
+            for n in nodes:
+                if n.get("type") != "auto_balancer":
+                    n_copy = n.copy()
+                    if "name" in n_copy and n_copy["name"]:
+                        n_copy["name"] = clean_node_name(n_copy["name"])
+                    clean_nodes.append(n_copy)
 
             # Prevent wiping existing cache with empty list unless explicitly forced
             if len(clean_nodes) == 0 and not force:
@@ -154,8 +170,8 @@ class VPNManager:
             res = generate_warp_identity(self.bin_dir, self.settings_dir, force=False, log_func=self.log)
             if res.get("success"):
                 nodes = res.get("nodes") or ([res["node"]] if res.get("node") else [])
-                return nodes, None, {"name": "🛡️ Warp Generation"}
-            return [], None, {"name": "🛡️ Warp Generation"}
+                return nodes, None, {"name": "Warp Generation"}
+            return [], None, {"name": "Warp Generation"}
 
         if url == "redshield_vpn":
             from core.redshield import load_redshield_nodes, REDSHIELD_SUB_NAME
@@ -351,6 +367,29 @@ class VPNManager:
         # 1. Virtual Auto-balancer node (leastPing observatory strategy)
         if node.get("type") == "auto_balancer":
             candidate_nodes = [n for n in self.load_nodes() if n.get("type") != "auto_balancer"]
+            xray_candidates = [
+                n for n in candidate_nodes
+                if n.get("type") in ("vless", "vmess", "trojan", "shadowsocks", "balancer")
+            ]
+            best = node.get("best_node")
+            if (best and best.get("type") in ("hysteria2", "hy2", "tuic", "wireguard", "warp", "awg")) or not xray_candidates:
+                target_node = best or (candidate_nodes[0] if candidate_nodes else node)
+                return self.generate_config(target_node, iface=iface)
+
+            # Prioritize candidate nodes: lowest latency responsive nodes first
+            def _node_sort_key(n):
+                p = n.get("ping")
+                if isinstance(p, (int, float)) and p > 0:
+                    return (0, p)
+                return (1, 9999)
+            candidate_nodes.sort(key=_node_sort_key)
+            if best:
+                candidate_nodes = [
+                    n for n in candidate_nodes
+                    if not (n.get("server") == best.get("server") and n.get("port") == best.get("port"))
+                ]
+                candidate_nodes.insert(0, best)
+
             settings = self.load_settings()
             preset = settings.get("selected_preset", PRESET_DEFAULT)
             config_data, server_ips = build_auto_balancer_config(candidate_nodes, preset=preset, iface=iface)
@@ -558,7 +597,18 @@ class VPNManager:
         return connected
 
     def _setup_tunnel(self, node: Dict[str, Any]) -> bool:
-        is_singbox = node.get("type") in ("hysteria2", "hy2", "tuic", "wireguard", "warp", "awg")
+        effective_node = node
+        if node.get("type") == "auto_balancer":
+            candidate_nodes = [n for n in self.load_nodes() if n.get("type") != "auto_balancer"]
+            xray_candidates = [
+                n for n in candidate_nodes
+                if n.get("type") in ("vless", "vmess", "trojan", "shadowsocks", "balancer")
+            ]
+            best = node.get("best_node")
+            if (best and best.get("type") in ("hysteria2", "hy2", "tuic", "wireguard", "warp", "awg")) or not xray_candidates:
+                effective_node = best or (candidate_nodes[0] if candidate_nodes else node)
+
+        is_singbox = effective_node.get("type") in ("hysteria2", "hy2", "tuic", "wireguard", "warp", "awg")
         if is_singbox:
             if not ensure_singbox(self.bin_dir, self.singbox_path, log_func=self.log, plugin_dir=self.plugin_dir):
                 self.log("sing-box binary unavailable, aborting start.")
@@ -840,7 +890,7 @@ class VPNManager:
 
             meta = settings.get("subscription_metadata", {})
             meta[sub_key] = {
-                "name": "🛡️ Warp Generation",
+                "name": "Warp Generation",
                 "upload": 0,
                 "download": 0,
                 "total": 0,

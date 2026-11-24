@@ -29,6 +29,7 @@ import {
   readClipboardText,
   formatBytes,
   formatExpiry,
+  stripEmojis,
 } from "./utils";
 
 // Backend RPC bridge
@@ -41,6 +42,7 @@ const updateSubscription = callable<[url: string], NodeConfig[]>("update_subscri
 const savePreset = callable<[preset: string], boolean>("save_preset");
 const getNodes = callable<[], NodeConfig[]>("get_nodes");
 const connectNode = callable<[node: NodeConfig], boolean>("connect_node");
+const autoSelectBestNode = callable<[], { success: boolean; node_name?: string; ping?: number; server?: string; error?: string }>("auto_select_best_node");
 const disconnect = callable<[], boolean>("disconnect");
 const isConnected = callable<[], boolean>("is_connected");
 const getSteamLanguage = callable<[], string>("get_steam_language");
@@ -212,7 +214,7 @@ function Content() {
 
   const autoNode: NodeConfig = useMemo(() => {
     const existing = nodes.find(
-      (n) => n.type === "auto_balancer" || n.server === "auto" || n.name === "⚡ Авто-выбор лучшего"
+      (n) => n.type === "auto_balancer" || n.server === "auto" || n.name?.includes("Авто-выбор") || n.name?.includes("Auto-Select")
     );
     if (existing) {
       return {
@@ -247,7 +249,8 @@ function Content() {
       (selectedNode.type === "auto_balancer" ||
         selectedNode.server === "auto" ||
         selectedNode.name === autoNode.name ||
-        selectedNode.name === "⚡ Авто-выбор лучшего" ||
+        selectedNode.name?.includes("Авто-выбор") ||
+        selectedNode.name?.includes("Auto-Select") ||
         selectedNode.name === t("autoBalancerBtn"))
   );
 
@@ -521,7 +524,71 @@ function Content() {
     }
   };
 
+  const handleAutoSelectBest = async () => {
+    if (isAutoSelected && connected) {
+      setLoading(true);
+      try {
+        await disconnect();
+        setConnected(false);
+        toaster.toast({ title: t("tunnelStopped"), body: t("tunnelStoppedBody") });
+      } catch (err) {
+        toaster.toast({ title: t("error"), body: `${err}` });
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
+    if (connected) {
+      setLoading(true);
+      try {
+        await disconnect();
+        setConnected(false);
+      } catch (err) {
+        console.error("Disconnect error:", err);
+      }
+    }
+
+    setLoading(true);
+    setSelectedNode(autoNode);
+
+    try {
+      const raw = await autoSelectBestNode();
+      const res = unwrap<{ success: boolean; node_name?: string; ping?: number; server?: string; error?: string; best_node?: NodeConfig }>(raw);
+      if (res && res.success) {
+        setConnected(true);
+        if (res.best_node) {
+          setSelectedNode({
+            ...autoNode,
+            best_node: res.best_node,
+          });
+        }
+        const serverName = stripEmojis(res.node_name || autoNode.name);
+        const pingStr = res.ping ? ` (${res.ping} ms)` : "";
+        const bodyMsg = lang === "russian"
+          ? `Выбран сервер: ${serverName}${pingStr}`
+          : t("toastSelectedNode", { name: `${serverName}${pingStr}` });
+        toaster.toast({
+          title: t("autoBalancerBtn"),
+          body: bodyMsg,
+        });
+      } else {
+        toaster.toast({ title: t("error"), body: res?.error || t("tunnelStartFailed") });
+        setConnected(false);
+      }
+    } catch (err) {
+      toaster.toast({ title: t("error"), body: `${err}` });
+      setConnected(false);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSelectNode = async (node: NodeConfig) => {
+    if (node.type === "auto_balancer" || node.server === "auto") {
+      return handleAutoSelectBest();
+    }
+
     const isCurrentActive =
       selectedNode &&
       (selectedNode.name === node.name ||
@@ -559,7 +626,7 @@ function Content() {
         const success = unwrap<boolean>(rawSuccess);
         if (success) {
           setConnected(true);
-          toaster.toast({ title: t("tunnelStarted"), body: t("tunnelStartedBody", { name: node.name }) });
+          toaster.toast({ title: t("tunnelStarted"), body: t("tunnelStartedBody", { name: stripEmojis(node.name) }) });
         } else {
           toaster.toast({ title: t("error"), body: t("tunnelStartFailed") });
           setConnected(false);
@@ -595,13 +662,16 @@ function Content() {
         toaster.toast({ title: t("toastWarning"), body: t("noNodeSelected") });
         return;
       }
+      if (targetNode.type === "auto_balancer" || targetNode.server === "auto" || isAutoSelected) {
+        return handleAutoSelectBest();
+      }
       setLoading(true);
       try {
         const rawSuccess = await connectNode(targetNode);
         const success = unwrap<boolean>(rawSuccess);
         if (success) {
           setConnected(true);
-          toaster.toast({ title: t("tunnelStarted"), body: t("tunnelStartedBody", { name: targetNode.name }) });
+          toaster.toast({ title: t("tunnelStarted"), body: t("tunnelStartedBody", { name: stripEmojis(targetNode.name) }) });
         } else {
           toaster.toast({ title: t("error"), body: t("tunnelStartFailed") });
           setConnected(false);
@@ -647,192 +717,166 @@ function Content() {
           onClick={handleToggleConnect}
           disabled={loading}
         >
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              justifyContent: "center",
-              width: "100%",
-              padding: "4px 0",
-              fontWeight: "bold",
-            }}
-          >
-            <span style={{ fontSize: "14px", color: connected ? "#ff6b6b" : "#4ade80" }}>
-              {connected ? `🔴 ${t("disconnectVpn")}` : `🟢 ${t("connectVpn")}`}
+          <span style={{ color: connected ? "#ff6b6b" : "#4ade80", fontWeight: "bold" }}>
+            {connected ? t("disconnectVpn") : t("connectVpn")}
+          </span>
+        </ButtonItem>
+      </PanelSectionRow>
+
+      {selectedNode && (
+        <div style={{ textAlign: "center", fontSize: "11px", color: "#a5a5a5", marginTop: "-6px", marginBottom: "8px" }}>
+          {connected
+            ? `${t("tunnelStarted")}: ${isAutoSelected ? (selectedNode.best_node?.name ? `${t("autoBalancerBtn")} (${stripEmojis(selectedNode.best_node.name)})` : t("autoBalancerBtn")) : stripEmojis(selectedNode.name)}`
+            : t("selectedServer", { name: isAutoSelected ? (selectedNode.best_node?.name ? `${t("autoBalancerBtn")} (${stripEmojis(selectedNode.best_node.name)})` : t("autoBalancerBtn")) : stripEmojis(selectedNode.name) })}
+        </div>
+      )}
+      {!connected && !selectedNode && (
+        <div style={{ textAlign: "center", fontSize: "11px", color: "#888", marginTop: "-6px", marginBottom: "8px" }}>
+          {t("noNodeSelected")}
+        </div>
+      )}
+
+      {/* Выбор пресета маршрутизации */}
+      <PanelSectionRow>
+        <ButtonItem
+          layout="below"
+          onClick={() => setPresetExpanded(!presetExpanded)}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", overflow: "hidden" }}>
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, textAlign: "left" }}>
+              {t("presetLabel")}: <span style={{ color: "#1a9fff" }}>
+                {t((PRESET_OPTIONS.find((p) => p.key === preset)?.labelKey || "presetDefault") as TranslationKeys)}
+              </span>
             </span>
-            {selectedNode ? (
-              <span style={{ fontSize: "11px", fontWeight: "normal", color: "#a5a5a5", marginTop: "3px", textAlign: "center" }}>
-                {connected
-                  ? `${t("tunnelStarted")}: ${isAutoSelected ? t("autoBalancerBtn") : selectedNode.name}`
-                  : t("selectedServer", { name: isAutoSelected ? t("autoBalancerBtn") : selectedNode.name })}
-              </span>
-            ) : !connected ? (
-              <span style={{ fontSize: "11px", fontWeight: "normal", color: "#888", marginTop: "3px" }}>
-                {t("noNodeSelected")}
-              </span>
-            ) : null}
+            <span style={{ fontSize: "10px", color: "#888", marginLeft: "6px", flexShrink: 0 }}>
+              {presetExpanded ? "▼" : "▶"}
+            </span>
           </div>
         </ButtonItem>
       </PanelSectionRow>
 
-      {/* Выбор пресета маршрутизации */}
-      <PanelSection>
-        <PanelSectionRow>
-          <ButtonItem
-            layout="below"
-            onClick={() => setPresetExpanded(!presetExpanded)}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
-              <span style={{ fontSize: "11px", fontWeight: "bold", color: "#a5a5a5", textTransform: "uppercase", letterSpacing: "0.5px" }}>
-                {t("presetLabel")}: <span style={{ color: "#1a9fff", fontWeight: "normal", textTransform: "none" }}>
-                  {t((PRESET_OPTIONS.find((p) => p.key === preset)?.labelKey || "presetDefault") as TranslationKeys)}
-                </span>
-              </span>
-              <span style={{ fontSize: "10px", color: "#888" }}>
-                {presetExpanded ? "▼" : "▶"}
-              </span>
-            </div>
-          </ButtonItem>
-        </PanelSectionRow>
-
-        {presetExpanded && (
-          <>
-            {PRESET_OPTIONS.map((item) => {
-              const isSelected = preset === item.key;
-              const label = t(item.labelKey);
-              return (
-                <PanelSectionRow key={item.key}>
-                  <div style={{ position: "relative", width: "100%" }}>
-                    <ButtonItem
-                      layout="below"
-                      onClick={() => {
-                        handlePresetChange(item.key, label);
-                        setPresetExpanded(false);
+      {presetExpanded && (
+        <>
+          {PRESET_OPTIONS.map((item) => {
+            const isSelected = preset === item.key;
+            const label = t(item.labelKey);
+            return (
+              <PanelSectionRow key={item.key}>
+                <div style={{ position: "relative", width: "100%" }}>
+                  <ButtonItem
+                    layout="below"
+                    onClick={() => {
+                      handlePresetChange(item.key, label);
+                      setPresetExpanded(false);
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontWeight: isSelected ? "bold" : "normal",
+                        color: isSelected ? "#1a9fff" : "inherit",
                       }}
                     >
-                      <div
-                        style={{
-                          fontWeight: isSelected ? "bold" : "normal",
-                          color: isSelected ? "#1a9fff" : "inherit",
-                        }}
-                      >
-                        {label}
-                      </div>
-                    </ButtonItem>
-                    {isSelected && (
-                      <div
-                        style={{
-                          position: "absolute",
-                          top: 0,
-                          left: 0,
-                          right: 0,
-                          bottom: 0,
-                          border: "1.5px solid #1a9fff",
-                          borderRadius: "4px",
-                          pointerEvents: "none",
-                          backgroundColor: "rgba(26, 159, 255, 0.1)",
-                        }}
-                      />
-                    )}
-                  </div>
-                </PanelSectionRow>
-              );
-            })}
-          </>
-        )}
-      </PanelSection>
+                      {label}
+                    </div>
+                  </ButtonItem>
+                  {isSelected && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        border: "1.5px solid #1a9fff",
+                        borderRadius: "4px",
+                        pointerEvents: "none",
+                        backgroundColor: "rgba(26, 159, 255, 0.1)",
+                      }}
+                    />
+                  )}
+                </div>
+              </PanelSectionRow>
+            );
+          })}
+        </>
+      )}
 
       {/* Выбор фильтра протоколов */}
-      <PanelSection>
-        <PanelSectionRow>
-          <ButtonItem
-            layout="below"
-            onClick={() => setProtocolExpanded(!protocolExpanded)}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
-              <span style={{ fontSize: "11px", fontWeight: "bold", color: "#a5a5a5", textTransform: "uppercase", letterSpacing: "0.5px" }}>
-                {t("protocolFilterLabel")}: <span style={{ color: "#1a9fff", fontWeight: "normal", textTransform: "none" }}>
-                  {t((PROTOCOL_OPTIONS.find((p) => p.key === protocolFilter)?.labelKey || "protocolFilterAll") as TranslationKeys)}
-                </span>
+      <PanelSectionRow>
+        <ButtonItem
+          layout="below"
+          onClick={() => setProtocolExpanded(!protocolExpanded)}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", overflow: "hidden" }}>
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, textAlign: "left" }}>
+              {t("protocolFilterLabel")}: <span style={{ color: "#1a9fff" }}>
+                {t((PROTOCOL_OPTIONS.find((p) => p.key === protocolFilter)?.labelKey || "protocolFilterAll") as TranslationKeys)}
               </span>
-              <span style={{ fontSize: "10px", color: "#888" }}>
-                {protocolExpanded ? "▼" : "▶"}
-              </span>
-            </div>
-          </ButtonItem>
-        </PanelSectionRow>
+            </span>
+            <span style={{ fontSize: "10px", color: "#888", marginLeft: "6px", flexShrink: 0 }}>
+              {protocolExpanded ? "▼" : "▶"}
+            </span>
+          </div>
+        </ButtonItem>
+      </PanelSectionRow>
 
-        {protocolExpanded && (
-          <>
-            {PROTOCOL_OPTIONS.map((item) => {
-              const isSelected = protocolFilter === item.key;
-              const label = t(item.labelKey);
-              return (
-                <PanelSectionRow key={item.key}>
-                  <div style={{ position: "relative", width: "100%" }}>
-                    <ButtonItem
-                      layout="below"
-                      onClick={() => {
-                        setProtocolFilter(item.key);
-                        setProtocolExpanded(false);
+      {protocolExpanded && (
+        <>
+          {PROTOCOL_OPTIONS.map((item) => {
+            const isSelected = protocolFilter === item.key;
+            const label = t(item.labelKey);
+            return (
+              <PanelSectionRow key={item.key}>
+                <div style={{ position: "relative", width: "100%" }}>
+                  <ButtonItem
+                    layout="below"
+                    onClick={() => {
+                      setProtocolFilter(item.key);
+                      setProtocolExpanded(false);
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontWeight: isSelected ? "bold" : "normal",
+                        color: isSelected ? "#1a9fff" : "inherit",
                       }}
                     >
-                      <div
-                        style={{
-                          fontWeight: isSelected ? "bold" : "normal",
-                          color: isSelected ? "#1a9fff" : "inherit",
-                        }}
-                      >
-                        {label}
-                      </div>
-                    </ButtonItem>
-                    {isSelected && (
-                      <div
-                        style={{
-                          position: "absolute",
-                          top: 0,
-                          left: 0,
-                          right: 0,
-                          bottom: 0,
-                          border: "1.5px solid #1a9fff",
-                          borderRadius: "4px",
-                          pointerEvents: "none",
-                          backgroundColor: "rgba(26, 159, 255, 0.1)",
-                        }}
-                      />
-                    )}
-                  </div>
-                </PanelSectionRow>
-              );
-            })}
-          </>
-        )}
-      </PanelSection>
+                      {label}
+                    </div>
+                  </ButtonItem>
+                  {isSelected && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        border: "1.5px solid #1a9fff",
+                        borderRadius: "4px",
+                        pointerEvents: "none",
+                        backgroundColor: "rgba(26, 159, 255, 0.1)",
+                      }}
+                    />
+                  )}
+                </div>
+              </PanelSectionRow>
+            );
+          })}
+        </>
+      )}
 
       {/* Кнопка выбора авто-балансировщика */}
       <PanelSectionRow>
         <div style={{ position: "relative", width: "100%" }}>
           <ButtonItem
             layout="below"
-            onClick={() => handleSelectNode(autoNode)}
+            onClick={handleAutoSelectBest}
             disabled={loading}
           >
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                width: "100%",
-                fontWeight: isAutoSelected ? "bold" : "normal",
-                color: isAutoSelected ? "#1a9fff" : "inherit",
-              }}
-            >
-              <span>{t("autoBalancerBtn")}</span>
-              {isAutoSelected && (
-                <span style={{ color: "#1a9fff", fontWeight: "bold", fontSize: "14px" }}>✔</span>
-              )}
-            </div>
+            <span style={{ color: isAutoSelected ? "#1a9fff" : "inherit", fontWeight: isAutoSelected ? "bold" : "normal" }}>
+              {t("autoBalancerBtn")}
+            </span>
           </ButtonItem>
           {isAutoSelected && (
             <div
@@ -938,7 +982,7 @@ function Content() {
                           }}
                           title={domainLabel}
                         >
-                          {domainLabel}
+                          {stripEmojis(domainLabel)}
                           <span style={{ fontSize: "11px", fontWeight: "normal", color: "#888", marginLeft: "6px" }}>
                             {protocolFilter === "all" ? `(${subNodes.length})` : `(${filteredSubNodes.length}/${subNodes.length})`}
                           </span>
@@ -985,7 +1029,7 @@ function Content() {
                                     <div style={{ display: "flex", alignItems: "center", gap: "8px", textAlign: "left" }}>
                                       <div>
                                         <div style={{ fontWeight: isActive ? "bold" : "normal", color: isActive ? "#1a9fff" : "inherit" }}>
-                                          {node.name}
+                                          {stripEmojis(node.name)}
                                         </div>
                                         <div style={{ fontSize: "0.8em", color: "#888" }}>{getNodeMethodLabel(node)}</div>
                                       </div>
@@ -1022,7 +1066,7 @@ function Content() {
                     {connected && selectedNode && selectedNode.subscription_url === url && (
                       <PanelSectionRow>
                         <div style={{ color: "#1a9fff", fontWeight: "bold", padding: "4px 0", fontSize: "12px" }}>
-                          {t("selectedServer", { name: selectedNode.name }) + (realDelay ? ` • ${realDelay} ms` : "")}
+                          {t("selectedServer", { name: stripEmojis(selectedNode.name) }) + (realDelay ? ` • ${realDelay} ms` : "")}
                         </div>
                       </PanelSectionRow>
                     )}
@@ -1046,7 +1090,7 @@ function Content() {
                         onClick={handleCheckPing}
                         disabled={loading || isPinging}
                       >
-                        {isPinging ? (lang === "russian" ? "⚡ Измерение пинга..." : "⚡ Measuring Ping...") : (lang === "russian" ? "⚡ Проверить пинг" : "⚡ Check Ping")}
+                        {isPinging ? t("measuringPing") : t("checkPing")}
                       </ButtonItem>
                     </PanelSectionRow>
 
