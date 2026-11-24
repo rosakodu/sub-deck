@@ -20,7 +20,9 @@ class TestSpeedtest(unittest.TestCase):
 
     def test_extract_flag_from_name(self):
         self.assertEqual(extract_flag_from_name("🇵🇱 Poland 1"), "🇵🇱")
-        self.assertIsNone(extract_flag_from_name("Poland 1"))
+        self.assertEqual(extract_flag_from_name("Poland 1"), "🇵🇱")
+        self.assertEqual(extract_flag_from_name("RedShield | Польша | Game"), "🇵🇱")
+        self.assertIsNone(extract_flag_from_name("NoFlagServer"))
         self.assertIsNone(extract_flag_from_name(None))
 
     @patch("core.speedtest.handshake_ping", return_value=None)

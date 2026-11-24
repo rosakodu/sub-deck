@@ -29,11 +29,49 @@ def country_code_to_flag(code: Optional[str]) -> Optional[str]:
     return chr(0x1F1E6 + ord(clean[0]) - ord("A")) + chr(0x1F1E6 + ord(clean[1]) - ord("A"))
 
 
+_COUNTRY_NAME_MAP = {
+    "польша": "PL", "poland": "PL",
+    "германия": "DE", "germany": "DE",
+    "нидерланды": "NL", "голландия": "NL", "netherlands": "NL",
+    "финляндия": "FI", "finland": "FI",
+    "австрия": "AT", "austria": "AT",
+    "венгрия": "HU", "hungary": "HU",
+    "великобритания": "GB", "англия": "GB", "uk": "GB", "britain": "GB",
+    "сша": "US", "америка": "US", "usa": "US", "united states": "US",
+    "франция": "FR", "france": "FR",
+    "турция": "TR", "turkey": "TR",
+    "оаэ": "AE", "дубай": "AE", "uae": "AE", "dubai": "AE",
+    "швеция": "SE", "sweden": "SE",
+    "швейцария": "CH", "switzerland": "CH",
+    "чехия": "CZ", "czech": "CZ",
+    "италия": "IT", "italy": "IT",
+    "испания": "ES", "spain": "ES",
+    "канада": "CA", "canada": "CA",
+    "япония": "JP", "japan": "JP",
+    "сингапур": "SG", "singapore": "SG",
+    "гонконг": "HK", "hong kong": "HK",
+    "казахстан": "KZ", "kazakhstan": "KZ",
+    "латвия": "LV", "latvia": "LV",
+    "литва": "LT", "lithuania": "LT",
+    "эстония": "EE", "estonia": "EE",
+    "норвегия": "NO", "norway": "NO",
+    "сербия": "RS", "serbia": "RS",
+    "россия": "RU", "russia": "RU",
+    "украина": "UA", "ukraine": "UA",
+}
+
+
 def extract_flag_from_name(name: Optional[str]) -> Optional[str]:
     if not name or not isinstance(name, str):
         return None
     match = re.search(r"[\U0001F1E6-\U0001F1FF]{2}", name)
-    return match.group(0) if match else None
+    if match:
+        return match.group(0)
+    lower = name.lower()
+    for keyword, code in _COUNTRY_NAME_MAP.items():
+        if keyword in lower:
+            return country_code_to_flag(code)
+    return None
 
 
 def _get_free_port() -> int:
@@ -126,52 +164,63 @@ def _curl_country_flag(socks_port: int) -> Optional[str]:
 
 
 def _curl_download_mbps(socks_port: int, timeout: float = 5.0) -> Optional[float]:
-    try:
-        res = subprocess.run(
-            [
-                "curl", "-s", "-o", "/dev/null",
-                "--socks5-hostname", f"127.0.0.1:{socks_port}",
-                "--connect-timeout", "3",
-                "--max-time", str(int(timeout)),
-                "-w", "%{speed_download}",
-                "https://speed.cloudflare.com/__down?bytes=5000000",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=timeout + 2,
-        )
-        if res.returncode == 0 and res.stdout.strip():
-            bps = float(res.stdout.strip())
-            if bps > 0:
-                return round((bps * 8.0) / 1_000_000.0, 2)
-    except Exception:
-        pass
+    urls = (
+        "https://speed.cloudflare.com/__down?bytes=5000000",
+        "https://proof.ovh.net/files/1Mb.dat",
+        "http://cachefly.cachefly.net/1mb.test",
+    )
+    for url in urls:
+        try:
+            res = subprocess.run(
+                [
+                    "curl", "-s", "-o", "/dev/null",
+                    "--socks5-hostname", f"127.0.0.1:{socks_port}",
+                    "--connect-timeout", "2",
+                    "--max-time", str(int(timeout)),
+                    "-w", "%{speed_download}",
+                    url,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=timeout + 2,
+            )
+            if res.returncode == 0 and res.stdout.strip():
+                bps = float(res.stdout.strip())
+                if bps > 0:
+                    return round((bps * 8.0) / 1_000_000.0, 2)
+        except Exception:
+            continue
     return None
 
 
 def _curl_upload_mbps(socks_port: int, payload_path: str, timeout: float = 5.0) -> Optional[float]:
-    try:
-        res = subprocess.run(
-            [
-                "curl", "-s", "-o", "/dev/null",
-                "--socks5-hostname", f"127.0.0.1:{socks_port}",
-                "--connect-timeout", "3",
-                "--max-time", str(int(timeout)),
-                "-X", "POST",
-                "--data-binary", f"@{payload_path}",
-                "-w", "%{speed_upload}",
-                "https://speed.cloudflare.com/__up",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=timeout + 2,
-        )
-        if res.returncode == 0 and res.stdout.strip():
-            bps = float(res.stdout.strip())
-            if bps > 0:
-                return round((bps * 8.0) / 1_000_000.0, 2)
-    except Exception:
-        pass
+    urls = (
+        "https://speed.cloudflare.com/__up",
+        "https://httpbin.org/post",
+    )
+    for url in urls:
+        try:
+            res = subprocess.run(
+                [
+                    "curl", "-s", "-o", "/dev/null",
+                    "--socks5-hostname", f"127.0.0.1:{socks_port}",
+                    "--connect-timeout", "2",
+                    "--max-time", str(int(timeout)),
+                    "-X", "POST",
+                    "--data-binary", f"@{payload_path}",
+                    "-w", "%{speed_upload}",
+                    url,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=timeout + 2,
+            )
+            if res.returncode == 0 and res.stdout.strip():
+                bps = float(res.stdout.strip())
+                if bps > 0:
+                    return round((bps * 8.0) / 1_000_000.0, 2)
+        except Exception:
+            continue
     return None
 
 
