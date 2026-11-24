@@ -13,24 +13,41 @@ from typing import List, Dict, Optional, Any
 from core.constants import PING_DEFAULT_TIMEOUT, PING_SAMPLE_MAX, URL_TEST_URL, URL_TEST_FALLBACK
 
 
-def handshake_ping(host: str, port: int, sni: Optional[str] = None, timeout: float = PING_DEFAULT_TIMEOUT) -> Optional[float]:
+def _is_ip(addr: str) -> bool:
+    try:
+        import ipaddress
+        ipaddress.ip_address(addr)
+        return True
+    except (ValueError, Exception):
+        return False
+
+
+def extract_node_sni(node: Dict[str, Any]) -> Optional[str]:
+    """Extracts valid SNI domain for TLS handshake ping, matching Throne behavior."""
+    sni = node.get("sni") or node.get("host")
+    if not sni:
+        sec = str(node.get("security", "")).lower()
+        ntype = str(node.get("type", "")).lower()
+        if sec in ("tls", "reality") or ntype in ("trojan", "vless"):
+            server = node.get("server", "")
+            if server and not _is_ip(server):
+                sni = server
+    return sni
+
+
+def handshake_ping(
+    host: str,
+    port: int,
+    sni: Optional[str] = None,
+    timeout: float = PING_DEFAULT_TIMEOUT,
+    is_udp: bool = False
+) -> Optional[float]:
     """
-    Measures TCP + TLS handshake latency in milliseconds.
+    Measures TCP + TLS handshake latency in milliseconds (Throne method).
     If SNI is provided, performs full TLS ClientHello/ServerHello negotiation.
     Returns None if connection failed.
     """
-    start = time.time()
-    s = None
-    try:
-        s = socket.create_connection((host, port), timeout=timeout)
-        if sni:
-            ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
-            with ctx.wrap_socket(s, server_hostname=sni):
-                return (time.time() - start) * 1000.0
-        return (time.time() - start) * 1000.0
-    except Exception:
+    if is_udp:
         # Fallback to ICMP ping for UDP protocols (e.g. WireGuard / AWG)
         try:
             p_start = time.time()
@@ -44,6 +61,22 @@ def handshake_ping(host: str, port: int, sni: Optional[str] = None, timeout: flo
                 return (time.time() - p_start) * 1000.0
         except Exception:
             pass
+        return None
+
+    # TCP / TLS handshake test (matching Throne's Tcping / TLS ping)
+    start = time.time()
+    s = None
+    try:
+        s = socket.create_connection((host, port), timeout=timeout)
+        if sni:
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            with ctx.wrap_socket(s, server_hostname=sni):
+                return (time.time() - start) * 1000.0
+        return (time.time() - start) * 1000.0
+    except Exception:
+        # TCP connection refused, timeout, or TLS handshake failure -> Unavailable
         return None
     finally:
         if s is not None:
@@ -89,16 +122,24 @@ def check_nodes_ping(nodes: List[Dict[str, Any]], max_workers: int = 25, timeout
     """Runs parallel TLS/TCP handshake ping across candidate nodes and returns sorted responsive nodes."""
     alive_nodes = []
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {
-            executor.submit(handshake_ping, n["server"], n["port"], n.get("sni") or n.get("host"), timeout): n
-            for n in nodes
-            if n.get("server") and n.get("port")
-        }
+        futures = {}
+        for n in nodes:
+            if n.get("server") and n.get("port"):
+                host = n["server"]
+                port = n["port"]
+                ntype = n.get("type", "")
+                sni = extract_node_sni(n)
+                is_udp = ntype in ("awg", "wireguard")
+                if is_udp:
+                    fut = executor.submit(handshake_ping, host, port, sni=sni, timeout=timeout, is_udp=True)
+                else:
+                    fut = executor.submit(handshake_ping, host, port, sni=sni, timeout=timeout)
+                futures[fut] = n
         for future in as_completed(futures):
             node = futures[future]
             try:
                 latency = future.result()
-                if latency is not None:
+                if latency is not None and latency > 0:
                     node_copy = node.copy()
                     node_copy["ping"] = int(latency)
                     alive_nodes.append(node_copy)
@@ -172,10 +213,10 @@ def select_best_nodes(
     return list(nodes)
 
 
-def ping_all_nodes(nodes: List[Dict[str, Any]], max_workers: int = 25, timeout: float = 1.8) -> List[Dict[str, Any]]:
+def ping_all_nodes(nodes: List[Dict[str, Any]], max_workers: int = 30, timeout: float = 2.0) -> List[Dict[str, Any]]:
     """
-    Runs parallel TLS/TCP handshake ping across all nodes and returns
-    the full list with updated 'ping' (latency in ms, or None if unreachable).
+    Runs parallel TLS/TCP handshake ping across all nodes (matching Throne method)
+    and returns the full list with updated 'ping' (latency in ms, or -1 if unreachable).
     """
     if not nodes:
         return []
@@ -186,20 +227,28 @@ def ping_all_nodes(nodes: List[Dict[str, Any]], max_workers: int = 25, timeout: 
         for idx, n in enumerate(node_copies):
             host = n.get("server")
             port = n.get("port")
-            if host and port and n.get("type") != "auto_balancer":
-                sni = n.get("sni") or n.get("host")
-                fut = executor.submit(handshake_ping, host, port, sni, timeout)
+            ntype = n.get("type", "")
+            if host and port and ntype != "auto_balancer":
+                sni = extract_node_sni(n)
+                is_udp = ntype in ("awg", "wireguard")
+                if is_udp:
+                    fut = executor.submit(handshake_ping, host, port, sni=sni, timeout=timeout, is_udp=True)
+                else:
+                    fut = executor.submit(handshake_ping, host, port, sni=sni, timeout=timeout)
                 futures_map[fut] = idx
-            elif n.get("type") == "auto_balancer":
+            elif ntype == "auto_balancer":
                 node_copies[idx]["ping"] = 1
 
         for fut in as_completed(futures_map):
             idx = futures_map[fut]
             try:
                 lat = fut.result()
-                node_copies[idx]["ping"] = int(lat) if lat is not None else None
+                if lat is not None and lat > 0:
+                    node_copies[idx]["ping"] = int(lat)
+                else:
+                    node_copies[idx]["ping"] = -1
             except Exception:
-                node_copies[idx]["ping"] = None
+                node_copies[idx]["ping"] = -1
 
     return node_copies
 

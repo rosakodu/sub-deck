@@ -282,16 +282,39 @@ class Plugin:
     async def get_nodes(self) -> list:
         return self.vpn.get_nodes()
 
-    async def ping_nodes(self) -> list:
-        """Pings all nodes in parallel, updates cached nodes with new ping values, and returns updated nodes."""
+    async def ping_nodes(self, subscription_url: str = None) -> list:
+        """
+        Pings nodes in parallel (Throne method).
+        If subscription_url is provided, only nodes from that subscription are tested.
+        Updates cached nodes with new ping values and returns updated nodes.
+        """
         from core.pinger import ping_all_nodes
         nodes = self.vpn.load_nodes()
         real_nodes = [n for n in nodes if n.get("type") != "auto_balancer"]
-        updated_real = await self.loop.run_in_executor(
-            None, lambda: ping_all_nodes(real_nodes, timeout=2.0)
+
+        if subscription_url:
+            target_nodes = [n for n in real_nodes if n.get("subscription_url") == subscription_url]
+        else:
+            target_nodes = real_nodes
+
+        if not target_nodes:
+            return self.vpn.get_nodes()
+
+        updated_targets = await self.loop.run_in_executor(
+            None, lambda: ping_all_nodes(target_nodes, timeout=2.0)
         )
+
+        target_map = {
+            (n.get("name"), n.get("server"), n.get("port")): n.get("ping")
+            for n in updated_targets
+        }
+        for n in real_nodes:
+            key = (n.get("name"), n.get("server"), n.get("port"))
+            if key in target_map:
+                n["ping"] = target_map[key]
+
         await self.loop.run_in_executor(
-            None, lambda: self.vpn.save_nodes(updated_real, force=True)
+            None, lambda: self.vpn.save_nodes(real_nodes, force=True)
         )
         return self.vpn.get_nodes()
 

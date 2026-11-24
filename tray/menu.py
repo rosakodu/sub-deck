@@ -96,7 +96,10 @@ def build_menu(
             label += f" [{(node_type or 'vless').upper()}]"
         ping = ping_map.get(f"{node.get('server')}:{node.get('port')}")
         if ping is not None:
-            label += f" • {ping}ms"
+            if ping > 0:
+                label += f" • {ping}ms"
+            elif ping == -1:
+                label += " • Unavailable"
         if (is_running and selected_node and node.get("server") == selected_node.get("server")
                 and node.get("port") == selected_node.get("port")):
             label = f"✔ {label}"

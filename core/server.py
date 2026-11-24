@@ -334,7 +334,8 @@ class SubDeckApiServer:
 
         # ── POST /api/ping ──
         if method == "POST" and path == "/api/ping":
-            nodes = await self.plugin.ping_nodes()
+            sub_url = data.get("subscription_url") if isinstance(data, dict) else None
+            nodes = await self.plugin.ping_nodes(sub_url)
             return 200, {"nodes": nodes}
 
         # ── POST /api/ping/real & GET /api/real_delay ──

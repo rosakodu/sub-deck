@@ -795,8 +795,10 @@ class SubDeckTrayApp:
             name = node.get("name", "Server")
             key = f"{node.get('server')}:{node.get('port')}"
             ping_val = self.ping_map.get(key)
-            if ping_val is not None:
+            if ping_val is not None and ping_val > 0:
                 report_lines.append(f"• {name} — {ping_val} ms")
+            elif ping_val == -1:
+                report_lines.append(f"• {name} — Unavailable")
             else:
                 report_lines.append(f"• {name} — n/a")
 

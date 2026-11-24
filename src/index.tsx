@@ -49,7 +49,7 @@ const exportLogs = callable<[], string>("export_logs");
 const getClipboard = callable<[], string>("get_clipboard");
 const getDesktopStatus = callable<[], { installed: boolean; autostart: boolean; enabled?: boolean }>("get_desktop_status");
 const setDesktopAutostart = callable<[enable: boolean], boolean>("set_desktop_autostart");
-const pingNodes = callable<[], NodeConfig[]>("ping_nodes");
+const pingNodes = callable<[subscription_url?: string], NodeConfig[]>("ping_nodes");
 const getRealDelay = callable<[], { success: boolean; delay_ms: number }>("get_real_delay");
 
 const PRESET_OPTIONS: Array<{ key: string; labelKey: TranslationKeys }> = [
@@ -284,7 +284,7 @@ function Content() {
   const [protocolExpanded, setProtocolExpanded] = useState<boolean>(false);
   const [trayAutostart, setTrayAutostart] = useState<boolean>(true);
   const [subMetadata, setSubMetadata] = useState<Record<string, SubscriptionMetadata>>({});
-  const [isPinging, setIsPinging] = useState(false);
+  const [pingingSubUrl, setPingingSubUrl] = useState<string | null>(null);
   const [realDelay, setRealDelay] = useState<number | null>(null);
   const isModalOpenRef = useRef<boolean>(false);
   const isQAMVisible = useQuickAccessVisible();
@@ -614,15 +614,89 @@ function Content() {
     }
   };
 
-  const handleCheckPing = async () => {
-    if (isPinging) return;
-    setIsPinging(true);
+  const renderPingBadge = (node: NodeConfig, isSubPinging: boolean) => {
+    if (isSubPinging) {
+      return (
+        <span style={{ fontSize: "11px", color: "#1a9fff", fontWeight: "bold" }}>
+          •••
+        </span>
+      );
+    }
+
+    const ping = node.ping;
+    if (ping === undefined || ping === null) {
+      return null;
+    }
+
+    if (ping === -1 || ping <= 0) {
+      return (
+        <span
+          style={{
+            fontSize: "11px",
+            color: "#888888",
+            fontWeight: "normal",
+            padding: "1px 5px",
+            borderRadius: "3px",
+            backgroundColor: "rgba(255, 255, 255, 0.05)",
+          }}
+        >
+          Unavailable
+        </span>
+      );
+    }
+
+    let pingColor = "#52c41a"; // green (<110ms)
+    if (ping > 280) {
+      pingColor = "#ff4d4f"; // red (>280ms)
+    } else if (ping > 180) {
+      pingColor = "#fa8c16"; // orange (181-280ms)
+    } else if (ping > 110) {
+      pingColor = "#faad14"; // amber/yellow (111-180ms)
+    }
+
+    return (
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "5px",
+          padding: "1px 5px",
+          borderRadius: "3px",
+          backgroundColor: "rgba(0, 0, 0, 0.25)",
+        }}
+      >
+        <span
+          style={{
+            display: "inline-block",
+            width: "3px",
+            height: "10px",
+            borderRadius: "1px",
+            backgroundColor: pingColor,
+          }}
+        />
+        <span
+          style={{
+            fontSize: "11px",
+            fontWeight: "bold",
+            color: pingColor,
+            fontFamily: "monospace",
+          }}
+        >
+          {ping} ms
+        </span>
+      </div>
+    );
+  };
+
+  const handleCheckPing = async (subUrl: string) => {
+    if (pingingSubUrl) return;
+    setPingingSubUrl(subUrl);
     try {
-      const raw = await pingNodes();
+      const raw = await pingNodes(subUrl);
       if (Array.isArray(raw) && raw.length > 0) {
         setNodes(raw);
       }
-      if (connected) {
+      if (connected && selectedNode?.subscription_url === subUrl) {
         const delayData = await getRealDelay();
         if (delayData?.success && delayData?.delay_ms) {
           setRealDelay(delayData.delay_ms);
@@ -631,7 +705,7 @@ function Content() {
     } catch (err) {
       console.error("handleCheckPing error:", err);
     } finally {
-      setIsPinging(false);
+      setPingingSubUrl(null);
     }
   };
 
@@ -1073,6 +1147,7 @@ function Content() {
             const usedBytes = (meta.upload || 0) + (meta.download || 0);
             const hasTrafficInfo = meta.total && meta.total > 0;
             const expiryLabel = meta.expire ? formatExpiry(meta.expire, lang) : "";
+            const isSubPinging = pingingSubUrl === url;
 
             return (
               <PanelSection key={idx}>
@@ -1143,14 +1218,23 @@ function Content() {
                                   onClick={() => handleSelectNode(node)}
                                   disabled={loading}
                                 >
-                                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
-                                    <div style={{ display: "flex", alignItems: "center", gap: "8px", textAlign: "left" }}>
-                                      <div>
-                                        <div style={{ fontWeight: isSelected ? "bold" : "normal", color: isSelected ? "#1a9fff" : "inherit" }}>
+                                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", gap: "8px" }}>
+                                    <div style={{ display: "flex", alignItems: "center", gap: "8px", textAlign: "left", minWidth: 0, flex: 1 }}>
+                                      <div style={{ minWidth: 0 }}>
+                                        <div style={{
+                                          fontWeight: isSelected ? "bold" : "normal",
+                                          color: isSelected ? "#1a9fff" : "inherit",
+                                          overflow: "hidden",
+                                          textOverflow: "ellipsis",
+                                          whiteSpace: "nowrap",
+                                        }}>
                                           {stripEmojis(node.name)}
                                         </div>
                                         <div style={{ fontSize: "0.8em", color: "#888" }}>{getNodeMethodLabel(node)}</div>
                                       </div>
+                                    </div>
+                                    <div style={{ flexShrink: 0, marginLeft: "auto", paddingLeft: "6px" }}>
+                                      {renderPingBadge(node, isSubPinging)}
                                     </div>
                                   </div>
                                 </ButtonItem>
@@ -1192,10 +1276,10 @@ function Content() {
                       <ButtonItem
                         layout="below"
                         highlightOnFocus={false}
-                        onClick={handleCheckPing}
-                        disabled={loading || isPinging}
+                        onClick={() => handleCheckPing(url)}
+                        disabled={loading || pingingSubUrl !== null}
                       >
-                        {isPinging ? t("measuringPing") : t("checkPing")}
+                        {isSubPinging ? t("measuringPing") : t("checkPing")}
                       </ButtonItem>
                     </PanelSectionRow>
 
