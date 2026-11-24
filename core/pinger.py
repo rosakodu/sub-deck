@@ -141,7 +141,7 @@ def check_nodes_ping(nodes: List[Dict[str, Any]], max_workers: int = 25, timeout
                 latency = future.result()
                 if latency is not None and latency > 0:
                     node_copy = node.copy()
-                    node_copy["ping"] = int(latency)
+                    node_copy["ping"] = max(1, int(latency))
                     alive_nodes.append(node_copy)
             except Exception:
                 pass
@@ -244,7 +244,7 @@ def ping_all_nodes(nodes: List[Dict[str, Any]], max_workers: int = 30, timeout: 
             try:
                 lat = fut.result()
                 if lat is not None and lat > 0:
-                    node_copies[idx]["ping"] = int(lat)
+                    node_copies[idx]["ping"] = max(1, int(lat))
                 else:
                     node_copies[idx]["ping"] = -1
             except Exception:

@@ -617,25 +617,40 @@ function Content() {
   const renderPingBadge = (node: NodeConfig, isSubPinging: boolean) => {
     if (isSubPinging) {
       return (
-        <span style={{ fontSize: "11px", color: "#1a9fff", fontWeight: "bold" }}>
+        <span
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            fontSize: "11px",
+            lineHeight: "14px",
+            color: "#1a9fff",
+            fontWeight: "bold",
+            padding: "2px 6px",
+            borderRadius: "3px",
+            backgroundColor: "rgba(26, 159, 255, 0.1)",
+          }}
+        >
           •••
         </span>
       );
     }
 
     const ping = node.ping;
-    if (ping === undefined || ping === null) {
+    if (ping === undefined || ping === null || typeof ping !== "number" || !Number.isFinite(ping)) {
       return null;
     }
 
-    if (ping === -1 || ping <= 0) {
+    if (ping < 0) {
       return (
         <span
           style={{
+            display: "inline-flex",
+            alignItems: "center",
             fontSize: "11px",
+            lineHeight: "14px",
             color: "#888888",
             fontWeight: "normal",
-            padding: "1px 5px",
+            padding: "2px 6px",
             borderRadius: "3px",
             backgroundColor: "rgba(255, 255, 255, 0.05)",
           }}
@@ -657,12 +672,13 @@ function Content() {
     return (
       <div
         style={{
-          display: "flex",
+          display: "inline-flex",
           alignItems: "center",
           gap: "5px",
-          padding: "1px 5px",
+          padding: "2px 6px",
           borderRadius: "3px",
-          backgroundColor: "rgba(0, 0, 0, 0.25)",
+          backgroundColor: "rgba(255, 255, 255, 0.06)",
+          lineHeight: "14px",
         }}
       >
         <span
@@ -680,9 +696,10 @@ function Content() {
             fontWeight: "bold",
             color: pingColor,
             fontFamily: "monospace",
+            lineHeight: "14px",
           }}
         >
-          {ping} ms
+          {ping === 0 ? "<1 ms" : `${ping} ms`}
         </span>
       </div>
     );
@@ -693,11 +710,13 @@ function Content() {
     setPingingSubUrl(subUrl);
     try {
       const raw = await pingNodes(subUrl);
-      if (Array.isArray(raw) && raw.length > 0) {
-        setNodes(raw);
+      const updatedNodes = unwrap<NodeConfig[]>(raw);
+      if (Array.isArray(updatedNodes) && updatedNodes.length > 0) {
+        setNodes(updatedNodes);
       }
       if (connected && selectedNode?.subscription_url === subUrl) {
-        const delayData = await getRealDelay();
+        const rawDelay = await getRealDelay();
+        const delayData = unwrap<{ success: boolean; delay_ms: number }>(rawDelay);
         if (delayData?.success && delayData?.delay_ms) {
           setRealDelay(delayData.delay_ms);
         }
@@ -800,6 +819,9 @@ function Content() {
       (selectedNode.name === node.name ||
         (selectedNode.type === "auto_balancer" && node.type === "auto_balancer") ||
         (selectedNode.server === "auto" && node.server === "auto")) &&
+      (!selectedNode.subscription_url ||
+        !node.subscription_url ||
+        selectedNode.subscription_url === node.subscription_url) &&
       connected;
 
     if (isCurrentActive) {
@@ -1206,38 +1228,85 @@ function Content() {
                   <>
                     {/* Список нод этой подписки */}
                     {filteredSubNodes.length > 0 ? (
-                      <div style={{ maxHeight: "250px", overflowY: "auto", paddingRight: "4px", marginBottom: "8px" }}>
+                      <div style={{ maxHeight: "250px", overflowY: "auto", overflowX: "hidden", paddingRight: "4px", marginBottom: "8px" }}>
                         {filteredSubNodes.map((node, nIdx) => {
-                          const isSelected = selectedNode?.name === node.name;
+                          const isSelected = Boolean(
+                            selectedNode &&
+                              selectedNode.name === node.name &&
+                              (!selectedNode.subscription_url ||
+                                !node.subscription_url ||
+                                selectedNode.subscription_url === node.subscription_url)
+                          );
+                          const pingBadge = renderPingBadge(node, isSubPinging);
+                          const cleanName = stripEmojis(node.name);
                           return (
-                            <PanelSectionRow key={nIdx}>
-                              <div className={isSelected ? "sub-deck-selected" : ""} style={{ width: "100%" }}>
-                                <ButtonItem
-                                  layout="below"
-                                  highlightOnFocus={false}
-                                  onClick={() => handleSelectNode(node)}
-                                  disabled={loading}
+                            <PanelSectionRow key={`${node.name}-${node.server}-${node.port}-${nIdx}`}>
+                              <div
+                                className="sub-deck-node-item"
+                                style={{
+                                  width: "100%",
+                                  display: "flex",
+                                  flexDirection: "column",
+                                  marginBottom: nIdx < filteredSubNodes.length - 1 ? "10px" : "2px",
+                                }}
+                              >
+                                <div
+                                  className={
+                                    isSelected
+                                      ? "sub-deck-selected sub-deck-node-btn-wrap"
+                                      : "sub-deck-node-btn-wrap"
+                                  }
+                                  style={{ width: "100%" }}
                                 >
-                                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", gap: "8px" }}>
-                                    <div style={{ display: "flex", alignItems: "center", gap: "8px", textAlign: "left", minWidth: 0, flex: 1 }}>
-                                      <div style={{ minWidth: 0 }}>
-                                        <div style={{
+                                  <ButtonItem
+                                    {...({ className: "sub-deck-node-field" } as any)}
+                                    layout="below"
+                                    highlightOnFocus={false}
+                                    bottomSeparator="none"
+                                    onClick={() => handleSelectNode(node)}
+                                    disabled={loading}
+                                  >
+                                    <div style={{ width: "100%", minWidth: 0, textAlign: "left" }}>
+                                      <div
+                                        style={{
                                           fontWeight: isSelected ? "bold" : "normal",
                                           color: isSelected ? "#1a9fff" : "inherit",
                                           overflow: "hidden",
                                           textOverflow: "ellipsis",
                                           whiteSpace: "nowrap",
-                                        }}>
-                                          {stripEmojis(node.name)}
-                                        </div>
-                                        <div style={{ fontSize: "0.8em", color: "#888" }}>{getNodeMethodLabel(node)}</div>
+                                        }}
+                                        title={cleanName}
+                                      >
+                                        {cleanName}
+                                      </div>
+                                      <div
+                                        style={{
+                                          fontSize: "0.8em",
+                                          color: "#888",
+                                          overflow: "hidden",
+                                          textOverflow: "ellipsis",
+                                          whiteSpace: "nowrap",
+                                        }}
+                                      >
+                                        {getNodeMethodLabel(node)}
                                       </div>
                                     </div>
-                                    <div style={{ flexShrink: 0, marginLeft: "auto", paddingLeft: "6px" }}>
-                                      {renderPingBadge(node, isSubPinging)}
-                                    </div>
+                                  </ButtonItem>
+                                </div>
+                                {pingBadge && (
+                                  <div
+                                    className="sub-deck-node-ping"
+                                    style={{
+                                      display: "flex",
+                                      justifyContent: "flex-start",
+                                      alignItems: "center",
+                                      marginTop: "3px",
+                                      paddingLeft: "2px",
+                                    }}
+                                  >
+                                    {pingBadge}
                                   </div>
-                                </ButtonItem>
+                                )}
                               </div>
                             </PanelSectionRow>
                           );

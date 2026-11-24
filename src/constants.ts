@@ -135,6 +135,46 @@ export const SELECTED_BUTTON_CSS = `
     color: #1a1f26 !important;
     fill: #1a1f26 !important;
   }
+
+  /* 8. Компактная обёртка кнопки ноды (убирает стандартные 10px отступы Field в SteamOS,
+        чтобы бейдж пинга под кнопкой визуально относился именно к ней, а не плавал посередине,
+        и гарантирует корректное обрезание длинных имён с многоточием без переполнения вправо) */
+  .sub-deck-root :is(.sub-deck-node-field, .sub-deck-node-btn-wrap > div) {
+    padding-top: 0px !important;
+    padding-bottom: 0px !important;
+    padding-inline: 0px !important;
+    margin-inline: 0px !important;
+    box-sizing: border-box !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    background: transparent !important;
+    background-color: transparent !important;
+    outline: none !important;
+    box-shadow: none !important;
+    border: none !important;
+    scroll-margin-top: 8px;
+    scroll-margin-bottom: 28px;
+  }
+  .sub-deck-root :is(.sub-deck-node-field, .sub-deck-node-btn-wrap > div):is(::before, ::after) {
+    display: none !important;
+    content: none !important;
+  }
+  .sub-deck-root :is(.sub-deck-node-field, .sub-deck-node-btn-wrap > div) > div:not(:empty) {
+    min-width: 0 !important;
+    max-width: 100% !important;
+    flex: 1 1 0% !important;
+  }
+  .sub-deck-root :is(.sub-deck-node-field, .sub-deck-node-btn-wrap > div) > div:not(:empty) > div {
+    min-width: 0 !important;
+    max-width: 100% !important;
+    width: 100% !important;
+  }
+  .sub-deck-root :is(.sub-deck-node-field, .sub-deck-node-btn-wrap > div) :is(button, [role="button"], .DialogButton) {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    overflow: hidden !important;
+  }
 `;
 
 export const PASTE_BUTTON_CSS = `

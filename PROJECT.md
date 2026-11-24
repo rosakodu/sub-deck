@@ -118,3 +118,8 @@
    - Обновлена механика замера задержки (Throne-style): TCP/TLS handshake с автоопределением SNI и UDP ICMP fallback, целевой пинг отдельной подписки (`subscription_url`), цветовые бейджи задержки и статус `Unavailable` в Game Mode и трее (`efca709`).
    - Синхронизированы версии до `1.4.0` в `plugin.json`, `package.json`, `core/constants.py`.
    - Пройдены все 125 unit-тестов, собран релизный архив `out/sub-deck.zip`, удалены все старые релизы GitHub, обновлена ветка `main` и опубликован актуальный релиз `v.1.4.0`.
+24. [x] **Бейдж пинга под кнопками серверов и корректная обрезка длинных имён**:
+   - В `src/index.tsx` бейдж задержки (`renderPingBadge`) вынесен из строки кнопки ноды в отдельный блок `.sub-deck-node-ping` строго под кнопкой (`3px` от кнопки, `10px` до следующей ноды), с сохранением цветов и контраста при наведении/фокусе геймпада.
+   - В `src/constants.ts` добавлены стили `.sub-deck-node-field` / `.sub-deck-node-btn-wrap`, убирающие 10px отступы `Field` в SteamOS QAM и задающие `min-width: 0; max-width: 100%; overflow: hidden` для корректной обрезки длинных имён нод многоточием.
+   - В `src/index.tsx` добавлен `unwrap` в `handleCheckPing`, выровнена геометрия состояний бейджа и исправлено отображение `<1 ms` при `ping === 0`.
+   - В `core/pinger.py` субмиллисекундные задержки (`0 < lat < 1`) округляются к `1`, добавлен тест `test_ping_all_nodes_sub_millisecond_clamped_to_one` в `tests/test_ping_throne.py`. Пройдены 126 unit-тестов.

@@ -71,6 +71,15 @@ class TestThronePingMechanics(unittest.TestCase):
         self.assertEqual(res[0]["ping"], 45)
         self.assertEqual(res[1]["ping"], -1)  # Unavailable (Throne format)
 
+    @patch("core.pinger.handshake_ping")
+    def test_ping_all_nodes_sub_millisecond_clamped_to_one(self, mock_ping):
+        mock_ping.return_value = 0.4
+        nodes = [
+            {"name": "Local Fast", "server": "fast.local", "port": 443, "type": "vless"},
+        ]
+        res = ping_all_nodes(nodes)
+        self.assertEqual(res[0]["ping"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()
