@@ -14,6 +14,7 @@ import {
   callable,
   definePlugin,
   toaster,
+  useQuickAccessVisible,
 } from "@decky/api";
 import { FC, useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { FaNetworkWired, FaClipboard } from "react-icons/fa";
@@ -173,6 +174,104 @@ const AddSubscriptionModal: FC<AddSubscriptionModalProps> = ({ closeModal, onAdd
   );
 };
 
+function findSteamNavNode(el: HTMLElement | null): any {
+  if (!el) return null;
+  if ((el as any).__nav_node) return (el as any).__nav_node;
+  if ((el as any).__virtual_node) return (el as any).__virtual_node;
+
+  const navCtrl =
+    (window as any).FocusNavController ||
+    (window as any).GamepadNavTree?.m_context?.m_controller;
+  if (navCtrl?.FindNavNodeForElement) {
+    try {
+      const node = navCtrl.FindNavNodeForElement(el);
+      if (node) return node;
+    } catch {}
+  }
+
+  try {
+    const reactKey = Object.keys(el).find(
+      (k) => k.startsWith("__reactFiber") || k.startsWith("__reactInternalInstance")
+    );
+    let curr = (el as any)[reactKey || ""];
+    while (curr) {
+      if (curr.memoizedProps?.node?.BTakeFocus || curr.memoizedProps?.node?.TakeFocus) {
+        return curr.memoizedProps.node;
+      }
+      if (curr.memoizedProps?.focusNav?.TakeFocus) {
+        return curr.memoizedProps.focusNav;
+      }
+      if (curr.stateNode?.BTakeFocus || curr.stateNode?.TakeFocus) {
+        return curr.stateNode;
+      }
+      curr = curr.return;
+    }
+  } catch {}
+
+  return null;
+}
+
+function focusSteamElement(el: HTMLElement | null) {
+  if (!el) return;
+  const navNode = findSteamNavNode(el);
+  if (navNode) {
+    try {
+      if (typeof navNode.BTakeFocus === "function") {
+        navNode.BTakeFocus();
+        return;
+      }
+      if (typeof navNode.TakeFocus === "function") {
+        navNode.TakeFocus();
+        return;
+      }
+    } catch (e) {
+      console.warn("[sub-deck] navNode focus error:", e);
+    }
+  }
+
+  try {
+    el.focus({ preventScroll: true });
+  } catch {
+    try {
+      el.focus();
+    } catch {}
+  }
+}
+
+function scrollToTop(el: HTMLElement | null) {
+  if (!el) return;
+  try {
+    el.scrollIntoView({ block: "start", inline: "nearest", behavior: "instant" as any });
+  } catch {}
+
+  try {
+    let parent = el.parentElement;
+    while (parent) {
+      if (parent.scrollTop !== undefined && parent.scrollTop > 0) {
+        parent.scrollTop = 0;
+      }
+      if (parent.scrollLeft !== undefined && parent.scrollLeft > 0) {
+        parent.scrollLeft = 0;
+      }
+      parent = parent.parentElement;
+    }
+  } catch {}
+
+  try {
+    document
+      .querySelectorAll<HTMLElement>(
+        '[class*="ScrollPanel"], [class*="scrollPanel"], [class*="basicscrollpanel"], [class*="BasicScrollPanel"], [class*="ScrollContainer"], [class*="scrollContainer"], [class*="DialogBody"], [class*="dialogbody"], [class*="GamepadDialogContent"], [class*="gamepaddialogcontent"], [class*="quickaccessmenu"], [class*="QuickAccessMenu"], [class*="TabGroupPanel"], [class*="PanelSection"]'
+      )
+      .forEach((c) => {
+        if (c.scrollTop > 0) c.scrollTop = 0;
+      });
+  } catch {}
+
+  try {
+    window.scrollTo({ top: 0, left: 0, behavior: "instant" as any });
+  } catch {}
+}
+
 function Content() {
   const [lang, setLang] = useState<string>("english");
   const [subscriptions, setSubscriptions] = useState<string[]>([]);
@@ -190,6 +289,61 @@ function Content() {
   const [isPinging, setIsPinging] = useState(false);
   const [realDelay, setRealDelay] = useState<number | null>(null);
   const isModalOpenRef = useRef<boolean>(false);
+  const isQAMVisible = useQuickAccessVisible();
+  const connectBtnRef = useRef<HTMLDivElement | null>(null);
+  const wasVisibleRef = useRef<boolean>(false);
+
+  const resetScrollAndFocus = useCallback(() => {
+    const rootEl = connectBtnRef.current;
+    if (!rootEl) return;
+    const btn =
+      (rootEl.querySelector(
+        "button, [role='button'], .DialogButton, [class*='DialogButton'], [class*='Focusable'], [tabindex]"
+      ) as HTMLElement) || rootEl;
+    scrollToTop(rootEl);
+    focusSteamElement(btn);
+  }, []);
+
+  useEffect(() => {
+    resetScrollAndFocus();
+    const raf = typeof requestAnimationFrame === "function" ? requestAnimationFrame(resetScrollAndFocus) : null;
+    const t1 = setTimeout(resetScrollAndFocus, 50);
+    const t2 = setTimeout(resetScrollAndFocus, 150);
+    const t3 = setTimeout(resetScrollAndFocus, 300);
+    const t4 = setTimeout(resetScrollAndFocus, 500);
+
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(t3);
+      clearTimeout(t4);
+    };
+  }, [resetScrollAndFocus]);
+
+  useEffect(() => {
+    let raf: number | null = null;
+    let t1: any = null;
+    let t2: any = null;
+    let t3: any = null;
+    let t4: any = null;
+    if (isQAMVisible && !wasVisibleRef.current) {
+      resetScrollAndFocus();
+      raf = typeof requestAnimationFrame === "function" ? requestAnimationFrame(resetScrollAndFocus) : null;
+      t1 = setTimeout(resetScrollAndFocus, 50);
+      t2 = setTimeout(resetScrollAndFocus, 150);
+      t3 = setTimeout(resetScrollAndFocus, 300);
+      t4 = setTimeout(resetScrollAndFocus, 500);
+    }
+    wasVisibleRef.current = !!isQAMVisible;
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      if (t1) clearTimeout(t1);
+      if (t2) clearTimeout(t2);
+      if (t3) clearTimeout(t3);
+      if (t4) clearTimeout(t4);
+    };
+  }, [isQAMVisible, resetScrollAndFocus]);
 
   // Localization translator
   const t = useCallback(
@@ -714,30 +868,64 @@ function Content() {
       <div className="sub-deck-root">
         {/* Кнопка Подключить / Отключить */}
         <PanelSectionRow>
-          <ButtonItem
-            layout="below"
-            highlightOnFocus={false}
-            onClick={handleToggleConnect}
-            disabled={loading}
-          >
-            <span style={{ color: connected ? "#ff6b6b" : "#4ade80", fontWeight: "bold" }}>
-              {connected ? t("disconnectVpn") : t("connectVpn")}
-            </span>
-          </ButtonItem>
+          <div ref={connectBtnRef} style={{ width: "100%" }} tabIndex={-1}>
+            <ButtonItem
+              layout="below"
+              highlightOnFocus={false}
+              onClick={handleToggleConnect}
+              disabled={loading}
+              bottomSeparator="none"
+            >
+              <span style={{ color: connected ? "#ff6b6b" : "#4ade80", fontWeight: "bold" }}>
+                {connected ? t("disconnectVpn") : t("connectVpn")}
+              </span>
+            </ButtonItem>
+          </div>
         </PanelSectionRow>
 
         {selectedNode && (
-          <div style={{ textAlign: "center", fontSize: "11px", color: "#a5a5a5", marginTop: "-6px", marginBottom: "8px" }}>
+          <div
+            style={{
+              textAlign: "center",
+              fontSize: "11px",
+              color: "#a5a5a5",
+              marginTop: "6px",
+              marginBottom: "8px",
+              padding: "0 6px",
+              lineHeight: "1.4",
+              wordBreak: "break-word",
+            }}
+          >
             {connected
               ? `${t("tunnelStarted")}: ${isAutoSelected ? (selectedNode.best_node?.name ? `${t("autoBalancerBtn")} (${stripEmojis(selectedNode.best_node.name)})` : t("autoBalancerBtn")) : stripEmojis(selectedNode.name)}`
               : t("selectedServer", { name: isAutoSelected ? (selectedNode.best_node?.name ? `${t("autoBalancerBtn")} (${stripEmojis(selectedNode.best_node.name)})` : t("autoBalancerBtn")) : stripEmojis(selectedNode.name) })}
           </div>
         )}
         {!connected && !selectedNode && (
-          <div style={{ textAlign: "center", fontSize: "11px", color: "#888", marginTop: "-6px", marginBottom: "8px" }}>
+          <div
+            style={{
+              textAlign: "center",
+              fontSize: "11px",
+              color: "#888",
+              marginTop: "6px",
+              marginBottom: "8px",
+              padding: "0 6px",
+              lineHeight: "1.4",
+            }}
+          >
             {t("noNodeSelected")}
           </div>
         )}
+
+        {/* Разделитель строго ПОД надписью статуса сервера */}
+        <div
+          style={{
+            width: "100%",
+            height: "1px",
+            backgroundColor: "rgba(255, 255, 255, 0.12)",
+            margin: "4px 0 10px 0",
+          }}
+        />
 
         {/* Выбор пресета маршрутизации */}
         <PanelSectionRow>

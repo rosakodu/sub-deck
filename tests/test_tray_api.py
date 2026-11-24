@@ -100,6 +100,17 @@ class TestSubDeckApi(unittest.IsolatedAsyncioTestCase):
         status = await asyncio.to_thread(self.client.get_status)
         self.assertFalse(status.get("running"))
 
+    async def test_preset_bypass_ru_naming(self):
+        presets = await asyncio.to_thread(self.client.get_presets)
+        self.assertTrue(len(presets) > 0)
+        bypass_ru = next((p for p in presets if p.get("id") == "bypass_ru"), None)
+        self.assertIsNotNone(bypass_ru)
+        self.assertEqual(bypass_ru.get("name"), "Только заблокированные сайты (РФ напрямую)")
+
+        from tray.localization import STRINGS
+        self.assertEqual(STRINGS["ru"]["preset_bypass_ru"], "Только заблокированные сайты (РФ напрямую)")
+        self.assertEqual(STRINGS["en"]["preset_bypass_ru"], "Blocked sites only (Direct RU & LAN)")
+
     def test_autostart_generation(self):
         content = generate_autostart_content(BASE_DIR)
         self.assertIn("Name=Sub-Deck VPN Tray", content)
