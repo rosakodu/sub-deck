@@ -1,5 +1,8 @@
 export interface NodeConfig {
   ping?: number | null;
+  speed_down?: number | null;
+  speed_up?: number | null;
+  country_flag?: string | null;
   name: string;
   uuid: string;
   server: string;

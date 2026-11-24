@@ -300,18 +300,44 @@ class Plugin:
         if not target_nodes:
             return self.vpn.get_nodes()
 
-        updated_targets = await self.loop.run_in_executor(
-            None, lambda: ping_all_nodes(target_nodes, timeout=2.0)
-        )
-
-        target_map = {
-            (n.get("name"), n.get("server"), n.get("port")): n.get("ping")
-            for n in updated_targets
-        }
-        for n in real_nodes:
-            key = (n.get("name"), n.get("server"), n.get("port"))
-            if key in target_map:
-                n["ping"] = target_map[key]
+        if subscription_url:
+            from core.speedtest import speedtest_nodes
+            xray_path = getattr(self.vpn, "xray_path", None)
+            singbox_path = getattr(self.vpn, "singbox_path", None)
+            updated_targets = await self.loop.run_in_executor(
+                None,
+                lambda: speedtest_nodes(
+                    target_nodes,
+                    xray_path=xray_path,
+                    singbox_path=singbox_path,
+                    max_workers=4,
+                    timeout=5.0,
+                ),
+            )
+            target_map = {
+                (n.get("name"), n.get("server"), n.get("port")): n
+                for n in updated_targets
+            }
+            for n in real_nodes:
+                key = (n.get("name"), n.get("server"), n.get("port"))
+                if key in target_map:
+                    upd = target_map[key]
+                    n["ping"] = upd.get("ping")
+                    n["speed_down"] = upd.get("speed_down")
+                    n["speed_up"] = upd.get("speed_up")
+                    n["country_flag"] = upd.get("country_flag")
+        else:
+            updated_targets = await self.loop.run_in_executor(
+                None, lambda: ping_all_nodes(target_nodes, timeout=2.0)
+            )
+            target_map = {
+                (n.get("name"), n.get("server"), n.get("port")): n.get("ping")
+                for n in updated_targets
+            }
+            for n in real_nodes:
+                key = (n.get("name"), n.get("server"), n.get("port"))
+                if key in target_map:
+                    n["ping"] = target_map[key]
 
         await self.loop.run_in_executor(
             None, lambda: self.vpn.save_nodes(real_nodes, force=True)
