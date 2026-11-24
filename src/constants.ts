@@ -7,6 +7,20 @@ export const FREE_SUB_IDENTIFIERS = [
   "zieng2/wl"
 ];
 
+export const SELECTED_BUTTON_CSS = `
+  .sub-deck-selected button,
+  .sub-deck-selected [role="button"],
+  .sub-deck-selected .DialogButton {
+    border: 1.5px solid #1a9fff !important;
+    border-radius: 4px !important;
+  }
+  .sub-deck-selected button:not(:focus):not(.gpfocus):not(.gpfocuswithin),
+  .sub-deck-selected [role="button"]:not(:focus):not(.gpfocus):not(.gpfocuswithin),
+  .sub-deck-selected .DialogButton:not(:focus):not(.gpfocus):not(.gpfocuswithin) {
+    background-color: rgba(26, 159, 255, 0.1) !important;
+  }
+`;
+
 export const PASTE_BUTTON_CSS = `
   .paste-btn-clean {
     width: 38px !important;

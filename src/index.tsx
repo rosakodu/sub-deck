@@ -19,7 +19,7 @@ import { FC, useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { FaNetworkWired, FaClipboard } from "react-icons/fa";
 
 import { NodeConfig, TranslationKeys, SubscriptionMetadata, Settings, ProtocolCategory } from "./types";
-import { SUPPORT_COMMUNITY_URL, PASTE_BUTTON_CSS } from "./constants";
+import { SUPPORT_COMMUNITY_URL, PASTE_BUTTON_CSS, SELECTED_BUTTON_CSS } from "./constants";
 import { translations, getTranslation } from "./i18n";
 import {
   isFreeSubscriptionUrl,
@@ -709,8 +709,9 @@ function Content() {
   };
 
   return (
-    <PanelSection title={t("title")}>
-      {/* Кнопка Подключить / Отключить VPN */}
+    <PanelSection>
+      <style>{SELECTED_BUTTON_CSS}</style>
+      {/* Кнопка Подключить / Отключить */}
       <PanelSectionRow>
         <ButtonItem
           layout="below"
@@ -744,9 +745,7 @@ function Content() {
         >
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", overflow: "hidden" }}>
             <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, textAlign: "left" }}>
-              {t("presetLabel")}: <span style={{ color: "#1a9fff" }}>
-                {t((PRESET_OPTIONS.find((p) => p.key === preset)?.labelKey || "presetDefault") as TranslationKeys)}
-              </span>
+              {t("presetLabel")}
             </span>
             <span style={{ fontSize: "10px", color: "#888", marginLeft: "6px", flexShrink: 0 }}>
               {presetExpanded ? "▼" : "▶"}
@@ -762,7 +761,7 @@ function Content() {
             const label = t(item.labelKey);
             return (
               <PanelSectionRow key={item.key}>
-                <div style={{ position: "relative", width: "100%" }}>
+                <div className={isSelected ? "sub-deck-selected" : ""} style={{ width: "100%" }}>
                   <ButtonItem
                     layout="below"
                     onClick={() => {
@@ -779,21 +778,6 @@ function Content() {
                       {label}
                     </div>
                   </ButtonItem>
-                  {isSelected && (
-                    <div
-                      style={{
-                        position: "absolute",
-                        top: 0,
-                        left: 0,
-                        right: 0,
-                        bottom: 0,
-                        border: "1.5px solid #1a9fff",
-                        borderRadius: "4px",
-                        pointerEvents: "none",
-                        backgroundColor: "rgba(26, 159, 255, 0.1)",
-                      }}
-                    />
-                  )}
                 </div>
               </PanelSectionRow>
             );
@@ -809,9 +793,7 @@ function Content() {
         >
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", overflow: "hidden" }}>
             <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, textAlign: "left" }}>
-              {t("protocolFilterLabel")}: <span style={{ color: "#1a9fff" }}>
-                {t((PROTOCOL_OPTIONS.find((p) => p.key === protocolFilter)?.labelKey || "protocolFilterAll") as TranslationKeys)}
-              </span>
+              {t("protocolFilterLabel")}
             </span>
             <span style={{ fontSize: "10px", color: "#888", marginLeft: "6px", flexShrink: 0 }}>
               {protocolExpanded ? "▼" : "▶"}
@@ -827,7 +809,7 @@ function Content() {
             const label = t(item.labelKey);
             return (
               <PanelSectionRow key={item.key}>
-                <div style={{ position: "relative", width: "100%" }}>
+                <div className={isSelected ? "sub-deck-selected" : ""} style={{ width: "100%" }}>
                   <ButtonItem
                     layout="below"
                     onClick={() => {
@@ -844,21 +826,6 @@ function Content() {
                       {label}
                     </div>
                   </ButtonItem>
-                  {isSelected && (
-                    <div
-                      style={{
-                        position: "absolute",
-                        top: 0,
-                        left: 0,
-                        right: 0,
-                        bottom: 0,
-                        border: "1.5px solid #1a9fff",
-                        borderRadius: "4px",
-                        pointerEvents: "none",
-                        backgroundColor: "rgba(26, 159, 255, 0.1)",
-                      }}
-                    />
-                  )}
                 </div>
               </PanelSectionRow>
             );
@@ -868,7 +835,7 @@ function Content() {
 
       {/* Кнопка выбора авто-балансировщика */}
       <PanelSectionRow>
-        <div style={{ position: "relative", width: "100%" }}>
+        <div className={isAutoSelected ? "sub-deck-selected" : ""} style={{ width: "100%" }}>
           <ButtonItem
             layout="below"
             onClick={handleAutoSelectBest}
@@ -878,21 +845,6 @@ function Content() {
               {t("autoBalancerBtn")}
             </span>
           </ButtonItem>
-          {isAutoSelected && (
-            <div
-              style={{
-                position: "absolute",
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                border: "1.5px solid #1a9fff",
-                borderRadius: "4px",
-                pointerEvents: "none",
-                backgroundColor: "rgba(26, 159, 255, 0.1)",
-              }}
-            />
-          )}
         </div>
       </PanelSectionRow>
 
@@ -1017,18 +969,18 @@ function Content() {
                       <div style={{ maxHeight: "250px", overflowY: "auto", paddingRight: "4px", marginBottom: "8px" }}>
                         {filteredSubNodes.map((node, nIdx) => {
                           const isSelected = selectedNode?.name === node.name;
-                          const isActive = isSelected && connected;
                           return (
                             <PanelSectionRow key={nIdx}>
-                              <div style={{ position: "relative", width: "100%" }}>
+                              <div className={isSelected ? "sub-deck-selected" : ""} style={{ width: "100%" }}>
                                 <ButtonItem
                                   layout="below"
                                   onClick={() => handleSelectNode(node)}
+                                  disabled={loading}
                                 >
                                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
                                     <div style={{ display: "flex", alignItems: "center", gap: "8px", textAlign: "left" }}>
                                       <div>
-                                        <div style={{ fontWeight: isActive ? "bold" : "normal", color: isActive ? "#1a9fff" : "inherit" }}>
+                                        <div style={{ fontWeight: isSelected ? "bold" : "normal", color: isSelected ? "#1a9fff" : "inherit" }}>
                                           {stripEmojis(node.name)}
                                         </div>
                                         <div style={{ fontSize: "0.8em", color: "#888" }}>{getNodeMethodLabel(node)}</div>
@@ -1036,19 +988,6 @@ function Content() {
                                     </div>
                                   </div>
                                 </ButtonItem>
-                                {isActive && (
-                                  <div style={{
-                                    position: "absolute",
-                                    top: 0,
-                                    left: 0,
-                                    right: 0,
-                                    bottom: 0,
-                                    border: "1.5px solid #1a9fff",
-                                    borderRadius: "4px",
-                                    pointerEvents: "none",
-                                    backgroundColor: "rgba(26, 159, 255, 0.1)"
-                                  }} />
-                                )}
                               </div>
                             </PanelSectionRow>
                           );
