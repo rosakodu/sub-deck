@@ -59,7 +59,7 @@ export const translations: Record<string, Record<TranslationKeys, string>> = {
     protocolFilterObfs: "Obfuscation / Random (AWG / Warp)",
     protocolFilterUdp: "Fast UDP (Hysteria 2 / TUIC)",
     noNodesForFilter: "No servers found for this protocol filter",
-    autoBalancerBtn: "Auto-Select Best Server"
+    autoBalancerBtn: "Auto-Select Server"
   },
   russian: {
     title: "Управление VLESS",
@@ -119,7 +119,7 @@ export const translations: Record<string, Record<TranslationKeys, string>> = {
     protocolFilterObfs: "Обфускация / Random (AWG / Warp)",
     protocolFilterUdp: "Скоростной UDP (Hysteria 2 / TUIC)",
     noNodesForFilter: "Нет серверов для выбранного протокола",
-    autoBalancerBtn: "Авто-выбор лучшего сервера"
+    autoBalancerBtn: "Авто-выбор сервера"
   },
   schinese: {
     title: "VLESS 管理",
@@ -179,7 +179,7 @@ export const translations: Record<string, Record<TranslationKeys, string>> = {
     protocolFilterObfs: "混淆 / 随机流量 (AWG / Warp)",
     protocolFilterUdp: "高速 UDP (Hysteria 2 / TUIC)",
     noNodesForFilter: "未找到符合所选协议的服务器",
-    autoBalancerBtn: "自动选择最佳服务器"
+    autoBalancerBtn: "自动选择服务器"
   },
   tchinese: {
     title: "VLESS 管理",
@@ -239,7 +239,7 @@ export const translations: Record<string, Record<TranslationKeys, string>> = {
     protocolFilterObfs: "混淆 / 隨機流量 (AWG / Warp)",
     protocolFilterUdp: "高速 UDP (Hysteria 2 / TUIC)",
     noNodesForFilter: "未找到符合所選協議的伺服器",
-    autoBalancerBtn: "自動選擇最佳伺服器"
+    autoBalancerBtn: "自動選擇伺服器"
   },
   arabic: {
     title: "إدارة VLESS",
@@ -299,7 +299,7 @@ export const translations: Record<string, Record<TranslationKeys, string>> = {
     protocolFilterObfs: "تشويش / حركة عشوائية (AWG / Warp)",
     protocolFilterUdp: "UDP سريع (Hysteria 2 / TUIC)",
     noNodesForFilter: "لم يتم العثور على خوادم لهذا البروتوكول",
-    autoBalancerBtn: "الاختيار التلقائي لأفضل خادم"
+    autoBalancerBtn: "الاختيار التلقائي للخادم"
   },
   persian: {
     title: "مدیریت VLESS",
@@ -359,7 +359,7 @@ export const translations: Record<string, Record<TranslationKeys, string>> = {
     protocolFilterObfs: "مبهم‌سازی / تصادفی (AWG / Warp)",
     protocolFilterUdp: "UDP سریع (Hysteria 2 / TUIC)",
     noNodesForFilter: "هیچ سروری برای این فیلتر پروتکل پیدا نشد",
-    autoBalancerBtn: "انتخاب خودکار بهترین سرور"
+    autoBalancerBtn: "انتخاب خودکار سرور"
   },
   turkish: {
     title: "VPN Yapılandırmaları",
@@ -419,7 +419,7 @@ export const translations: Record<string, Record<TranslationKeys, string>> = {
     protocolFilterObfs: "Gizleme / Rastgele (AWG / Warp)",
     protocolFilterUdp: "Hızlı UDP (Hysteria 2 / TUIC)",
     noNodesForFilter: "Bu protokol filtresi için sunucu bulunamadı",
-    autoBalancerBtn: "En İyi Sunucuyu Otomatik Seç"
+    autoBalancerBtn: "Sunucuyu Otomatik Seç"
   }
 };
 

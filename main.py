@@ -346,7 +346,7 @@ class Plugin:
         # Construct auto balancer node
         auto_node = {
             "type": "auto_balancer",
-            "name": "Авто-выбор лучшего сервера",
+            "name": "Авто-выбор сервера",
             "server": "auto",
             "port": 0,
             "ping": best_ping or 1,

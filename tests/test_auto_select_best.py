@@ -31,6 +31,7 @@ class TestAutoSelectBestServer(unittest.TestCase):
             ("🌐 Global Server", "Global Server"),
             ("🏴‍☠️ Pirate Proxy", "Pirate Proxy"),
             ("⚡ Авто-выбор лучшего", "Авто-выбор лучшего"),
+            ("⚡ Авто-выбор сервера", "Авто-выбор сервера"),
             ("[автобалансер] 🇩🇪 Fast Server", "Fast Server"),
             ("Normal Server Name", "Normal Server Name"),
         ]
@@ -133,7 +134,7 @@ class TestAutoSelectBestServer(unittest.TestCase):
             mgr.save_nodes(candidates)
             auto_node = {
                 "type": "auto_balancer",
-                "name": "Авто-выбор лучшего сервера",
+                "name": "Авто-выбор сервера",
                 "best_node": candidates[1],  # Node B is best
             }
             with patch("vpn_manager.resolve_host", side_effect=lambda h: h):

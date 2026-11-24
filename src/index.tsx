@@ -711,38 +711,41 @@ function Content() {
   return (
     <PanelSection>
       <style>{SELECTED_BUTTON_CSS}</style>
-      {/* Кнопка Подключить / Отключить */}
-      <PanelSectionRow>
-        <ButtonItem
-          layout="below"
-          onClick={handleToggleConnect}
-          disabled={loading}
-        >
-          <span style={{ color: connected ? "#ff6b6b" : "#4ade80", fontWeight: "bold" }}>
-            {connected ? t("disconnectVpn") : t("connectVpn")}
-          </span>
-        </ButtonItem>
-      </PanelSectionRow>
+      <div className="sub-deck-root">
+        {/* Кнопка Подключить / Отключить */}
+        <PanelSectionRow>
+          <ButtonItem
+            layout="below"
+            highlightOnFocus={false}
+            onClick={handleToggleConnect}
+            disabled={loading}
+          >
+            <span style={{ color: connected ? "#ff6b6b" : "#4ade80", fontWeight: "bold" }}>
+              {connected ? t("disconnectVpn") : t("connectVpn")}
+            </span>
+          </ButtonItem>
+        </PanelSectionRow>
 
-      {selectedNode && (
-        <div style={{ textAlign: "center", fontSize: "11px", color: "#a5a5a5", marginTop: "-6px", marginBottom: "8px" }}>
-          {connected
-            ? `${t("tunnelStarted")}: ${isAutoSelected ? (selectedNode.best_node?.name ? `${t("autoBalancerBtn")} (${stripEmojis(selectedNode.best_node.name)})` : t("autoBalancerBtn")) : stripEmojis(selectedNode.name)}`
-            : t("selectedServer", { name: isAutoSelected ? (selectedNode.best_node?.name ? `${t("autoBalancerBtn")} (${stripEmojis(selectedNode.best_node.name)})` : t("autoBalancerBtn")) : stripEmojis(selectedNode.name) })}
-        </div>
-      )}
-      {!connected && !selectedNode && (
-        <div style={{ textAlign: "center", fontSize: "11px", color: "#888", marginTop: "-6px", marginBottom: "8px" }}>
-          {t("noNodeSelected")}
-        </div>
-      )}
+        {selectedNode && (
+          <div style={{ textAlign: "center", fontSize: "11px", color: "#a5a5a5", marginTop: "-6px", marginBottom: "8px" }}>
+            {connected
+              ? `${t("tunnelStarted")}: ${isAutoSelected ? (selectedNode.best_node?.name ? `${t("autoBalancerBtn")} (${stripEmojis(selectedNode.best_node.name)})` : t("autoBalancerBtn")) : stripEmojis(selectedNode.name)}`
+              : t("selectedServer", { name: isAutoSelected ? (selectedNode.best_node?.name ? `${t("autoBalancerBtn")} (${stripEmojis(selectedNode.best_node.name)})` : t("autoBalancerBtn")) : stripEmojis(selectedNode.name) })}
+          </div>
+        )}
+        {!connected && !selectedNode && (
+          <div style={{ textAlign: "center", fontSize: "11px", color: "#888", marginTop: "-6px", marginBottom: "8px" }}>
+            {t("noNodeSelected")}
+          </div>
+        )}
 
-      {/* Выбор пресета маршрутизации */}
-      <PanelSectionRow>
-        <ButtonItem
-          layout="below"
-          onClick={() => setPresetExpanded(!presetExpanded)}
-        >
+        {/* Выбор пресета маршрутизации */}
+        <PanelSectionRow>
+          <ButtonItem
+            layout="below"
+            highlightOnFocus={false}
+            onClick={() => setPresetExpanded(!presetExpanded)}
+          >
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", overflow: "hidden" }}>
             <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, textAlign: "left" }}>
               {t("presetLabel")}
@@ -764,6 +767,7 @@ function Content() {
                 <div className={isSelected ? "sub-deck-selected" : ""} style={{ width: "100%" }}>
                   <ButtonItem
                     layout="below"
+                    highlightOnFocus={false}
                     onClick={() => {
                       handlePresetChange(item.key, label);
                       setPresetExpanded(false);
@@ -789,6 +793,7 @@ function Content() {
       <PanelSectionRow>
         <ButtonItem
           layout="below"
+          highlightOnFocus={false}
           onClick={() => setProtocolExpanded(!protocolExpanded)}
         >
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", overflow: "hidden" }}>
@@ -812,6 +817,7 @@ function Content() {
                 <div className={isSelected ? "sub-deck-selected" : ""} style={{ width: "100%" }}>
                   <ButtonItem
                     layout="below"
+                    highlightOnFocus={false}
                     onClick={() => {
                       setProtocolFilter(item.key);
                       setProtocolExpanded(false);
@@ -838,6 +844,7 @@ function Content() {
         <div className={isAutoSelected ? "sub-deck-selected" : ""} style={{ width: "100%" }}>
           <ButtonItem
             layout="below"
+            highlightOnFocus={false}
             onClick={handleAutoSelectBest}
             disabled={loading}
           >
@@ -852,6 +859,7 @@ function Content() {
       <PanelSectionRow>
         <ButtonItem
           layout="below"
+          highlightOnFocus={false}
           onClick={openAddSubscriptionModal}
           disabled={loading}
         >
@@ -862,6 +870,7 @@ function Content() {
       <PanelSectionRow>
         <ButtonItem
           layout="below"
+          highlightOnFocus={false}
           onClick={handleAddFreeVless}
           disabled={loading}
         >
@@ -872,6 +881,7 @@ function Content() {
       <PanelSectionRow>
         <ButtonItem
           layout="below"
+          highlightOnFocus={false}
           onClick={handleGenerateWarp}
           disabled={loading}
         >
@@ -916,6 +926,7 @@ function Content() {
                 <PanelSectionRow>
                   <ButtonItem
                     layout="below"
+                    highlightOnFocus={false}
                     onClick={() => setExpandedSubs((prev) => ({ ...prev, [url]: !prev[url] }))}
                   >
                     <div style={{ display: "flex", flexDirection: "column", width: "100%", gap: "4px" }}>
@@ -974,6 +985,7 @@ function Content() {
                               <div className={isSelected ? "sub-deck-selected" : ""} style={{ width: "100%" }}>
                                 <ButtonItem
                                   layout="below"
+                                  highlightOnFocus={false}
                                   onClick={() => handleSelectNode(node)}
                                   disabled={loading}
                                 >
@@ -1015,6 +1027,7 @@ function Content() {
                       <PanelSectionRow>
                         <ButtonItem
                           layout="below"
+                          highlightOnFocus={false}
                           onClick={() => handleUpdateSubscription(url)}
                           disabled={loading}
                         >
@@ -1026,6 +1039,7 @@ function Content() {
                     <PanelSectionRow>
                       <ButtonItem
                         layout="below"
+                        highlightOnFocus={false}
                         onClick={handleCheckPing}
                         disabled={loading || isPinging}
                       >
@@ -1038,6 +1052,7 @@ function Content() {
                       <div style={{ color: "#ff6347" }}>
                         <ButtonItem
                           layout="below"
+                          highlightOnFocus={false}
                           onClick={() => handleDeleteSubscription(url)}
                           disabled={loading}
                         >
@@ -1069,6 +1084,7 @@ function Content() {
       <PanelSectionRow>
         <ButtonItem
           layout="below"
+          highlightOnFocus={false}
           onClick={handleExportLogs}
           disabled={loading}
         >
@@ -1080,6 +1096,7 @@ function Content() {
       <PanelSectionRow>
         <ButtonItem
           layout="below"
+          highlightOnFocus={false}
           onClick={() => {
             if (Navigation?.NavigateToExternalWeb) {
               Navigation.NavigateToExternalWeb(SUPPORT_COMMUNITY_URL);
@@ -1091,6 +1108,7 @@ function Content() {
           {t("supportBtn")}
         </ButtonItem>
       </PanelSectionRow>
+      </div>
     </PanelSection>
   );
 }

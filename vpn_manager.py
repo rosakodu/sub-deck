@@ -126,7 +126,7 @@ class VPNManager:
             if len(ordered_nodes) > 1 and not any(n.get("type") == "auto_balancer" for n in ordered_nodes):
                 auto_node = {
                     "type": "auto_balancer",
-                    "name": "Авто-выбор лучшего сервера",
+                    "name": "Авто-выбор сервера",
                     "server": "auto",
                     "port": 0,
                     "ping": 1
