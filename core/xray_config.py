@@ -201,7 +201,7 @@ def build_xray_config(node: Dict[str, Any], server_ip: str, preset: str = "defau
         {"type": "field", "ip": ["geoip:private"], "outboundTag": "direct"},
     ]
 
-    if preset == PRESET_BYPASS_RU:
+    if preset in (PRESET_BYPASS_RU, PRESET_ROSCOMVPN):
         routing_rules.append({
             "type": "field",
             "domain": RU_BYPASS_DOMAINS + ["geosite:category-ru"],
@@ -227,17 +227,6 @@ def build_xray_config(node: Dict[str, Any], server_ip: str, preset: str = "defau
         routing_rules.append({
             "type": "field",
             "outboundTag": "proxy",
-            "network": "tcp,udp"
-        })
-    elif preset == PRESET_ROSCOMVPN:
-        routing_rules.append({
-            "type": "field",
-            "domain": ["geosite:category-ru-blocked"],
-            "outboundTag": "proxy"
-        })
-        routing_rules.append({
-            "type": "field",
-            "outboundTag": "direct",
             "network": "tcp,udp"
         })
     else:  # PRESET_DEFAULT (Full Tunnel)
@@ -302,6 +291,10 @@ def build_auto_balancer_config(
     for idx, node in enumerate(nodes):
         if node.get("type") not in ("vless", "vmess", "trojan", "shadowsocks", "balancer"):
             continue
+        if node.get("type") == "vless":
+            sec = node.get("security")
+            if sec in ("none", "false", "", None) or str(sec).strip().lower() in ("none", "false", ""):
+                continue
         host = node.get("server")
         if not host:
             continue
@@ -366,14 +359,11 @@ def build_auto_balancer_config(
         {"type": "field", "ip": ["geoip:private"], "outboundTag": "direct"},
     ]
 
-    if preset == PRESET_BYPASS_RU:
+    if preset in (PRESET_BYPASS_RU, PRESET_ROSCOMVPN):
         routing_rules.append({"type": "field", "domain": RU_BYPASS_DOMAINS + ["geosite:category-ru"], "outboundTag": "direct"})
         routing_rules.append({"type": "field", "ip": ["geoip:ru"], "outboundTag": "direct"})
     elif preset == PRESET_GAMING:
         routing_rules.append({"type": "field", "domain": STEAM_CDN_DOMAINS, "outboundTag": "direct"})
-    elif preset == PRESET_ROSCOMVPN:
-        routing_rules.append({"type": "field", "domain": ["geosite:category-ru-blocked"], "balancerTag": "auto_least_ping"})
-        routing_rules.append({"type": "field", "outboundTag": "direct", "network": "tcp,udp"})
 
     # Catch-all rule for leastPing balancer
     routing_rules.append({

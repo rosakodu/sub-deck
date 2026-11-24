@@ -71,13 +71,18 @@ class TunnelRouting:
         _require_command(["ip", "route", "add", "default", "dev", TUN_INTERFACE,
                                "metric", "1", "proto", TUN_ROUTE_PROTOCOL])
 
+        dns_list: List[str] = []
         if node_dns:
             if isinstance(node_dns, str):
-                dns_list = [d.strip() for d in node_dns.split(",") if d.strip()]
+                raw_dns = [d.strip() for d in node_dns.split(",") if d.strip()]
             else:
-                dns_list = [str(d).strip() for d in node_dns if str(d).strip()]
-        else:
-            dns_list = DNS_SERVERS
+                raw_dns = [str(d).strip() for d in node_dns if str(d).strip()]
+            for d in raw_dns:
+                if d and d not in dns_list:
+                    dns_list.append(d)
+        for d in DNS_SERVERS:
+            if d not in dns_list:
+                dns_list.append(d)
 
         _require_command(["resolvectl", "dns", TUN_INTERFACE] + dns_list)
         _require_command(["resolvectl", "domain", TUN_INTERFACE, "~."])

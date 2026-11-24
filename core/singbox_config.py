@@ -62,6 +62,24 @@ def build_singbox_outbound(node: Dict[str, Any], server_ip: str, iface: Optional
     return outbound
 
 
+def _extract_dns(node: Dict[str, Any], is_warp_node: bool) -> List[str]:
+    raw_dns = node.get("dns")
+    if raw_dns:
+        if isinstance(raw_dns, str):
+            dns_list = [d.strip() for d in raw_dns.split(",") if d.strip()]
+        else:
+            dns_list = [str(d).strip() for d in raw_dns if str(d).strip()]
+        if is_warp_node:
+            dns_list = [d for d in dns_list if d != "10.254.254.254"]
+    else:
+        dns_list = ["1.1.1.1", "8.8.8.8"]
+
+    if not dns_list:
+        dns_list = ["1.1.1.1", "8.8.8.8"]
+
+    return dns_list
+
+
 def build_singbox_config(
     node: Dict[str, Any],
     server_ip: str,
@@ -166,18 +184,15 @@ def build_singbox_config(
 
     rules: List[Dict[str, Any]] = []
 
+    is_warp_node = is_warp or "warp" in node.get("name", "").lower() or node.get("subscription_url") in ("amnezia_warp", "cloudflare_warp")
+
     # If AWG or WARP with internal/custom DNS, route DNS server IPs and port 53 to proxy FIRST
     if is_warp or is_awg:
-        node_dns = node.get("dns") or ["10.254.254.254", "1.1.1.1"]
-        if isinstance(node_dns, str):
-            dns_ips = [d.strip() for d in node_dns.split(",") if d.strip()]
-        else:
-            dns_ips = [str(d).strip() for d in node_dns if str(d).strip()]
-        if dns_ips:
-            rules.append({
-                "ip_cidr": [f"{ip}/32" if "/" not in ip else ip for ip in dns_ips],
-                "outbound": "proxy",
-            })
+        dns_ips = _extract_dns(node, is_warp_node)
+        rules.append({
+            "ip_cidr": [f"{ip}/32" if "/" not in ip else ip for ip in dns_ips],
+            "outbound": "proxy",
+        })
         rules.append({"port": [53], "outbound": "proxy"})
 
     rules.append({"ip_is_private": True, "outbound": "direct"})
@@ -210,21 +225,35 @@ def build_singbox_config(
     }
     if endpoints:
         cfg["endpoints"] = endpoints
-        node_dns = node.get("dns") or ["10.254.254.254", "1.1.1.1"]
-        if isinstance(node_dns, str):
-            node_dns = [d.strip() for d in node_dns.split(",") if d.strip()]
-        primary_dns = node_dns[0] if node_dns else "10.254.254.254"
+        node_dns = _extract_dns(node, is_warp_node)
+        primary_dns = node_dns[0]
+
+        fallback_candidates = [d for d in node_dns[1:] if d != primary_dns]
+        for fb in ("1.1.1.1", "8.8.8.8", "1.0.0.1"):
+            if fb != primary_dns and fb not in fallback_candidates:
+                fallback_candidates.append(fb)
+
+        dns_servers = [
+            {
+                "tag": "remote-dns",
+                "type": "udp",
+                "server": primary_dns,
+                "server_port": 53,
+                "detour": "proxy",
+            }
+        ]
+        for idx, fb_ip in enumerate(fallback_candidates):
+            tag = "fallback-dns" if idx == 0 else f"fallback-dns-{idx + 1}"
+            dns_servers.append({
+                "tag": tag,
+                "type": "udp",
+                "server": fb_ip,
+                "server_port": 53,
+                "detour": "proxy",
+            })
 
         cfg["dns"] = {
-            "servers": [
-                {
-                    "tag": "remote-dns",
-                    "type": "udp",
-                    "server": primary_dns,
-                    "server_port": 53,
-                    "detour": "proxy",
-                }
-            ],
+            "servers": dns_servers,
             "strategy": "prefer_ipv4",
         }
         cfg["route"]["default_domain_resolver"] = "remote-dns"

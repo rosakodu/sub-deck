@@ -190,6 +190,9 @@ class SubDeckApiServer:
 
     async def _route_request(self, method: str, path: str, data: Dict[str, Any]) -> tuple:
         """Dispatches request to appropriate plugin method."""
+        if not isinstance(data, dict):
+            data = {}
+
         vpn = self.plugin.vpn
         if not vpn:
             return 503, {"error": "VPN manager not initialized"}
@@ -216,6 +219,17 @@ class SubDeckApiServer:
         # ── POST /api/connect ──
         if method == "POST" and path == "/api/connect":
             node = data.get("node")
+            if not node and "index" in data and data["index"] is not None:
+                try:
+                    idx = int(data["index"])
+                    nodes = vpn.get_nodes()
+                    if 0 <= idx < len(nodes):
+                        node = nodes[idx]
+                    else:
+                        return 400, {"error": f"Node index out of range: {idx}"}
+                except (ValueError, TypeError):
+                    return 400, {"error": f"Invalid node index: {data.get('index')}"}
+
             if not node:
                 # If node wasn't passed directly, check if we have a saved selected_node
                 settings = vpn.load_settings()
@@ -323,14 +337,17 @@ class SubDeckApiServer:
             nodes = await self.plugin.ping_nodes()
             return 200, {"nodes": nodes}
 
-        # ── POST /api/ping/real ──
-        if method == "POST" and path == "/api/ping/real":
+        # ── POST /api/ping/real & GET /api/real_delay ──
+        if (method == "POST" and path in ("/api/ping/real", "/api/real_delay")) or \
+           (method == "GET" and path in ("/api/real_delay", "/api/ping/real")):
+            from core.constants import URL_TEST_URL
             from core.pinger import http_url_test
-            url = data.get("url")
+            url = data.get("url") if isinstance(data, dict) else None
+            test_url = url or URL_TEST_URL
             delay = await self.plugin.loop.run_in_executor(
-                None, lambda: http_url_test(url=url, timeout=3.5)
+                None, lambda: http_url_test(url=test_url, timeout=3.5)
             )
-            return 200, {"success": delay > 0, "delay_ms": delay}
+            return 200, {"success": bool(delay is not None and delay > 0), "delay_ms": delay}
 
         # ── GET /api/desktop/status ──
         if method == "GET" and path == "/api/desktop/status":
