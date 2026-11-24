@@ -32,13 +32,22 @@ Steam Deck 的 Decky Loader 外掛程式，讓您能夠管理 VLESS、VMess、Tr
 - [Goida VPN (AvenCores)](https://gitlab.com/avencores/goida-vpn-configs)：來自 Goida VPN 項目且頻繁更新的 VLESS 配置。
 - [zieng2/wl 訂閱](https://github.com/zieng2/wl)：來自 zieng2 wl 倉庫的高質量通用 VLESS 配置。
 
-*注意：為了提高性能和連線速度，免費訂閱將自動進行並行 TCP Ping 延遲測試，且僅保留並顯示前 5 個最快的節點。*
+*注意：為了提高性能和連線速度，免費訂閱將自動進行並行 TCP Ping 延遲測試，且僅保留並顯示前 15 個最快的節點（使用者自行新增的訂閱無節點數量限制）。*
 
 ## 📥 安裝
 
+### 1. 安裝 Decky Loader
+執行此外掛程式需要 **Decky Loader**。在桌面模式（Desktop Mode）開啟終端機（Konsole）並執行：
+```bash
+curl -L https://github.com/SteamDeckHomebrew/decky-installer/releases/latest/download/install_release.sh | sh
+```
+*(或使用包含區域鏡像的版本 [Decky Loader Russia](https://deckyloader.ru/): `curl -sL https://deckyloader.ru/install.sh | sh`)*
+
+### 2. 安裝 sub-deck 外掛程式
 1. 從 [Releases](https://github.com/rosakodu/sub-deck/releases) 頁面下載最新版本 (`sub-deck.zip`) 或手動建置。
 2. 將 ZIP 檔案複製到您的 Steam Deck 上。
-3. 在 Steam 設定中啟用 **開發者模式 (Developer Mode)**，然後在 Decky Loader 設定中啟用 **Developer mode** 並選擇 "Install plugin from file" (從檔案安裝外掛程式)。
+3. 在 Steam 設定中啟用 **開發者模式 (Developer Mode)**。
+4. 在 Decky Loader 設定（齒輪圖示）-> **Developer** 中啟用 **Developer mode** 並選擇 **"Install plugin from file"** (`sub-deck.zip`)。
 
 ## 🚀 如何使用
 

@@ -4,7 +4,7 @@ Single source of truth for URLs, defaults and configuration.
 """
 
 # Plugin version
-PLUGIN_VERSION = "1.2.7"
+PLUGIN_VERSION = "1.2.8"
 
 # Preset identifiers
 PRESET_DEFAULT = "default"        # Full Tunnel

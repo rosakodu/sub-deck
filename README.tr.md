@@ -32,13 +32,22 @@ Eklenti, önceden doğrulanmış ve otomatik olarak güncellenen üç kaynağı 
 - [Goida VPN (AvenCores)](https://gitlab.com/avencores/goida-vpn-configs): Goida VPN projesinden sık sık güncellenen VLESS yapılandırmaları.
 - [zieng2/wl Aboneliği](https://github.com/zieng2/wl): zieng2 wl deposundan yüksek kaliteli evrensel VLESS yapılandırmaları.
 
-*Not: Performans ve hız için, ücretsiz abonelikler paralel TCP ping testine tabi tutularak yalnızca en hızlı 5 aktif sunucu gösterilecek şekilde otomatik olarak filtrelenir.*
+*Not: Performans ve hız için, ücretsiz abonelikler paralel TCP ping testine tabi tutularak en hızlı 15 aktif sunucu gösterilecek şekilde otomatik olarak filtrelenir (kullanıcı tarafından eklenen aboneliklerde sınır yoktur).*
 
 ## 📥 Kurulum
 
+### 1. Decky Loader Kurulumu
+Eklentinin çalışması için **Decky Loader** gereklidir. Masaüstü Modunda (Desktop Mode) terminali (Konsole) açın ve çalıştırın:
+```bash
+curl -L https://github.com/SteamDeckHomebrew/decky-installer/releases/latest/download/install_release.sh | sh
+```
+*(Veya bölgesel hızlı aynalara sahip sürüm [Decky Loader Russia](https://deckyloader.ru/): `curl -sL https://deckyloader.ru/install.sh | sh`)*
+
+### 2. sub-deck Eklentisi Kurulumu
 1. [Sürümler (Releases)](https://github.com/rosakodu/sub-deck/releases) sayfasından en son sürümü (`sub-deck.zip`) indirin veya manuel olarak derleyin.
 2. ZIP dosyasını Steam Deck'inize kopyalayın.
-3. Steam Ayarlarında **Geliştirici Modunu (Developer Mode)** etkinleştirin, ardından Decky Loader ayarlarında **Developer mode**'u açın ve "Install plugin from file" seçeneğini belirleyin.
+3. Steam Ayarlarında **Geliştirici Modunu (Developer Mode)** etkinleştirin.
+4. Decky Loader ayarlarında (dişli simgesi) -> **Developer** bölümünden **Developer mode**'u açın ve **"Install plugin from file"** (`sub-deck.zip`) seçeneğini belirleyin.
 
 ## 🚀 Nasıl Kullanılır
 

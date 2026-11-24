@@ -42,13 +42,25 @@ The plugin includes a **"Free Subscriptions"** button that adds three pre-verifi
 - [Goida VPN (AvenCores)](https://gitlab.com/avencores/goida-vpn-configs): Frequently updated VLESS configurations from the Goida VPN project.
 - [zieng2/wl Subscription](https://github.com/zieng2/wl): High-quality universal VLESS configurations from the zieng2 wl repository.
 
-*Note: For performance and speed, free subscriptions are automatically filtered to show only the top 5 fastest nodes based on parallel TCP ping.*
+*Note: For performance and speed, free subscriptions are automatically filtered to show the top 15 fastest nodes based on parallel TCP ping (user-added subscriptions have no server limit).*
 
 ## 📥 Installation
 
+### 1. Install Decky Loader
+The plugin requires **Decky Loader**. You can install **[Decky Loader Russia](https://deckyloader.ru/)** (with regional fast mirrors):
+```bash
+curl -sL https://deckyloader.ru/install.sh | sh
+```
+*Or the official Decky Loader:*
+```bash
+curl -L https://github.com/SteamDeckHomebrew/decky-installer/releases/latest/download/install_release.sh | sh
+```
+
+### 2. Install sub-deck plugin
 1. Download the latest release (`sub-deck.zip`) from [Releases](https://github.com/rosakodu/sub-deck/releases) or build it manually.
 2. Copy the ZIP file to your Steam Deck.
-3. Enable **Developer Mode** in Steam Settings, then in Decky Loader settings, enable **Developer mode** and choose "Install plugin from file".
+3. Enable **Developer Mode** in Steam Settings.
+4. In Decky Loader settings (gear icon) -> **Developer**, enable **Developer mode**, and select **"Install plugin from file"** (`sub-deck.zip`).
 
 ## 🚀 How to Use
 

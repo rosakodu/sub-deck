@@ -32,13 +32,22 @@
 - [Goida VPN (AvenCores)](https://gitlab.com/avencores/goida-vpn-configs): تكوينات VLESS المحدثة بشكل متكرر من مشروع Goida VPN.
 - [اشتراك zieng2/wl](https://github.com/zieng2/wl): تكوينات VLESS العالمية عالية الجودة من مستودع zieng2 wl.
 
-*ملاحظة: لضمان الأداء والسرعة، يتم تصفية الاشتراكات المجانية تلقائيًا لعرض أسرع 5 عقد فقط بناءً على اختبار Ping متوازي عبر بروتوكول TCP.*
+*ملاحظة: لضمان الأداء والسرعة، يتم تصفية الاشتراكات المجانية تلقائيًا لعرض أسرع 15 عقدة بناءً على اختبار Ping متوازي عبر TCP (لا يوجد حد لعدد الخوادم للاشتراكات المضافة يدويًا).*
 
 ## 📥 التثبيت
 
+### 1. تثبيت Decky Loader
+يتطلب المكون الإضافي **Decky Loader**. في وضع سطح المكتب (Desktop Mode)، افتح الطرفية (Konsole) ونفّذ:
+```bash
+curl -L https://github.com/SteamDeckHomebrew/decky-installer/releases/latest/download/install_release.sh | sh
+```
+*(أو عبر [Decky Loader Russia](https://deckyloader.ru/): `curl -sL https://deckyloader.ru/install.sh | sh`)*
+
+### 2. تثبيت إضافة sub-deck
 1. قم بتنزيل أحدث إصدار (`sub-deck.zip`) من [الإصدارات](https://github.com/rosakodu/sub-deck/releases) أو قم ببنائه يدويًا.
 2. انسخ ملف ZIP إلى جهاز Steam Deck الخاص بك.
-3. قم بتمكين **وضع المطور** في إعدادات Steam، ثم في إعدادات Decky Loader، قم بتمكين **Developer mode** واختر "Install plugin from file".
+3. قم بتمكين **وضع المطور** في إعدادات Steam.
+4. في إعدادات Decky Loader (أيقونة الترس) -> **Developer**، قم بتمكين **Developer mode** واختر **"Install plugin from file"** (`sub-deck.zip`).
 
 ## 🚀 كيفية الاستخدام
 
