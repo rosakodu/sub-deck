@@ -172,70 +172,6 @@ const AddSubscriptionModal: FC<AddSubscriptionModalProps> = ({ closeModal, onAdd
   );
 };
 
-function findSteamNavNode(el: HTMLElement | null): any {
-  if (!el) return null;
-  if ((el as any).__nav_node) return (el as any).__nav_node;
-  if ((el as any).__virtual_node) return (el as any).__virtual_node;
-
-  const navCtrl =
-    (window as any).FocusNavController ||
-    (window as any).GamepadNavTree?.m_context?.m_controller;
-  if (navCtrl?.FindNavNodeForElement) {
-    try {
-      const node = navCtrl.FindNavNodeForElement(el);
-      if (node) return node;
-    } catch {}
-  }
-
-  try {
-    const reactKey = Object.keys(el).find(
-      (k) => k.startsWith("__reactFiber") || k.startsWith("__reactInternalInstance")
-    );
-    let curr = (el as any)[reactKey || ""];
-    while (curr) {
-      if (curr.memoizedProps?.node?.BTakeFocus || curr.memoizedProps?.node?.TakeFocus) {
-        return curr.memoizedProps.node;
-      }
-      if (curr.memoizedProps?.focusNav?.TakeFocus) {
-        return curr.memoizedProps.focusNav;
-      }
-      if (curr.stateNode?.BTakeFocus || curr.stateNode?.TakeFocus) {
-        return curr.stateNode;
-      }
-      curr = curr.return;
-    }
-  } catch {}
-
-  return null;
-}
-
-function focusSteamElement(el: HTMLElement | null) {
-  if (!el) return;
-  const navNode = findSteamNavNode(el);
-  if (navNode) {
-    try {
-      if (typeof navNode.BTakeFocus === "function") {
-        navNode.BTakeFocus();
-        return;
-      }
-      if (typeof navNode.TakeFocus === "function") {
-        navNode.TakeFocus();
-        return;
-      }
-    } catch (e) {
-      console.warn("[sub-deck] navNode focus error:", e);
-    }
-  }
-
-  try {
-    el.focus({ preventScroll: true });
-  } catch {
-    try {
-      el.focus();
-    } catch {}
-  }
-}
-
 function scrollToTop(el: HTMLElement | null) {
   if (!el) return;
   try {
@@ -294,12 +230,7 @@ function Content() {
   const resetScrollAndFocus = useCallback(() => {
     const rootEl = connectBtnRef.current;
     if (!rootEl) return;
-    const btn =
-      (rootEl.querySelector(
-        "button, [role='button'], .DialogButton, [class*='DialogButton'], [class*='Focusable'], [tabindex]"
-      ) as HTMLElement) || rootEl;
     scrollToTop(rootEl);
-    focusSteamElement(btn);
   }, []);
 
   useEffect(() => {
@@ -1301,9 +1232,11 @@ function Content() {
                                       display: "flex",
                                       justifyContent: "center",
                                       alignItems: "center",
+                                      gap: "6px",
                                       marginTop: "3px",
                                     }}
                                   >
+                                    <span style={{ fontSize: "11px", color: "#a5a5a5" }}>Текущий пинг:</span>
                                     {pingBadge}
                                   </div>
                                 )}
